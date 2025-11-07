@@ -1,0 +1,25 @@
+{
+  "name": "glyphcapsule-pwa",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Offline-capable PWA for exploring Glyphcapsule (MemGlyph) databases with hybrid retrieval",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.0.0",
+    "preact": "^10.19.3",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.8.0",
+    "@types/node": "^20.10.0",
+    "patch-package": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8",
+    "vite-plugin-pwa": "^0.17.4"
+  }
+}
