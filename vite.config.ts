@@ -57,6 +57,9 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@sqlite.org/sqlite-wasm']
   },
+  worker: {
+    format: 'es'
+  },
   server: {
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
