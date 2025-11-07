@@ -154,8 +154,8 @@ export function App() {
         setLlmProgress(progress);
       });
 
-      // Load Qwen 0.5B model
-      const modelInfo = await llmClient.loadModel(QWEN_MODELS['0.5b']);
+      // Load Qwen 3 0.6B model
+      const modelInfo = await llmClient.loadModel(QWEN_MODELS['0.6b']);
       setLlmModelInfo(modelInfo);
       setLlmProgress(null);
       console.log('Model loaded:', modelInfo);
@@ -291,7 +291,7 @@ export function App() {
                     disabled={llmLoading}
                   />
                   <span className="toggle-text">
-                    🤖 Enable LLM Reasoning (Qwen 0.5B)
+                    🤖 Enable LLM Reasoning (Qwen 3 0.6B)
                   </span>
                 </label>
                 {llmModelInfo?.loaded && (

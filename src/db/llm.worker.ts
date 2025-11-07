@@ -14,7 +14,7 @@ import { Wllama } from '@wllama/wllama';
 
 let wllama: Wllama | null = null;
 let modelInfo: LlmModelInfo = {
-  modelId: 'qwen2.5-0.5b',
+  modelId: 'qwen3-0.6b',
   loaded: false
 };
 
@@ -63,7 +63,7 @@ async function loadModel(modelUrl: string): Promise<LlmWorkerResponse> {
     });
 
     modelInfo = {
-      modelId: 'qwen2.5-0.5b',
+      modelId: 'qwen3-0.6b',
       loaded: true
     };
 
@@ -80,14 +80,16 @@ async function loadModel(modelUrl: string): Promise<LlmWorkerResponse> {
 function buildPrompt(request: ReasoningRequest): string {
   const { question, snippets } = request;
 
-  // System prompt
-  const systemPrompt = `You are a helpful AI assistant that answers questions based ONLY on the provided document snippets. You must:
+  // System prompt with /no_think directive to disable Qwen3 thinking mode
+  const systemPrompt = `/no_think
+
+You are a helpful AI assistant that answers questions based ONLY on the provided document snippets. You must:
 1. ONLY use information from the provided snippets
 2. ALWAYS cite the GID (Glyph ID) for each fact you use
 3. If the answer is not in the snippets, say "I don't have enough information in the provided documents to answer this question"
 4. Format citations like this: [Page X, GID: <gid>]
 
-Be concise and accurate.`;
+Be concise and accurate. Do NOT use thinking tags or show your reasoning process.`;
 
   // Format snippets
   const snippetsText = snippets
@@ -138,13 +140,25 @@ async function reason(request: ReasoningRequest): Promise<LlmWorkerResponse> {
     const prompt = buildPrompt(request);
     const startTime = performance.now();
 
+    // Get stop token IDs for thinking tags (to prevent Qwen3 thinking mode)
+    const stopTokens: number[] = [];
+    try {
+      const thinkOpenToken = await wllama.lookupToken('<think>');
+      const thinkCloseToken = await wllama.lookupToken('</think>');
+      if (thinkOpenToken !== -1) stopTokens.push(thinkOpenToken);
+      if (thinkCloseToken !== -1) stopTokens.push(thinkCloseToken);
+    } catch (e) {
+      console.warn('[LLM Worker] Could not lookup thinking tokens:', e);
+    }
+
     // Generate response
     const response = await wllama.createCompletion(prompt, {
       nPredict: request.maxTokens || 256,
       sampling: {
         temp: request.temperature || 0.7,
         top_p: 0.9,
-      }
+      },
+      stopTokens: stopTokens.length > 0 ? stopTokens : undefined
     });
 
     const inferenceTimeMs = performance.now() - startTime;
