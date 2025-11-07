@@ -1,6 +1,8 @@
 import { useState } from 'preact/hooks';
 import { getDbClient } from './db/client';
+import { getLlmClient, QWEN_MODELS } from './db/llm-client';
 import type { CapsuleInfo, HybridResult } from './db/types';
+import type { LlmModelInfo, ReasoningResponse, LlmProgress } from './db/llm-types';
 
 export function App() {
   const [capsuleInfo, setCapsuleInfo] = useState<CapsuleInfo | null>(null);
@@ -8,6 +10,13 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<HybridResult[] | null>(null);
   const [lastQuery, setLastQuery] = useState<string>('');
+
+  // LLM state
+  const [llmEnabled, setLlmEnabled] = useState(false);
+  const [llmModelInfo, setLlmModelInfo] = useState<LlmModelInfo | null>(null);
+  const [llmLoading, setLlmLoading] = useState(false);
+  const [llmProgress, setLlmProgress] = useState<LlmProgress | null>(null);
+  const [reasoning, setReasoning] = useState<ReasoningResponse | null>(null);
 
   const handleOpenDemo = async () => {
     setLoading(true);
@@ -32,17 +41,98 @@ export function App() {
     setLoading(true);
     setError(null);
     setLastQuery(query);
+    setReasoning(null); // Clear previous reasoning
 
     try {
       const dbClient = getDbClient();
       const results = await dbClient.searchHybrid(query, 10);
       setSearchResults(results);
       console.log('Search results:', results);
+
+      // If LLM is enabled and loaded, automatically reason
+      if (llmEnabled && llmModelInfo?.loaded && results.length > 0) {
+        await handleReason(query, results);
+      }
     } catch (err) {
       setError(String(err));
       console.error('Search failed:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLoadModel = async () => {
+    setLlmLoading(true);
+    setError(null);
+    setLlmProgress(null);
+
+    try {
+      const llmClient = getLlmClient();
+
+      // Set up progress callback
+      llmClient.onProgress((progress) => {
+        setLlmProgress(progress);
+      });
+
+      // Load Qwen 0.5B model
+      const modelInfo = await llmClient.loadModel(QWEN_MODELS['0.5b']);
+      setLlmModelInfo(modelInfo);
+      setLlmProgress(null);
+      console.log('Model loaded:', modelInfo);
+    } catch (err) {
+      setError(String(err));
+      console.error('Failed to load model:', err);
+    } finally {
+      setLlmLoading(false);
+    }
+  };
+
+  const handleToggleLlm = async () => {
+    if (!llmEnabled) {
+      // Enabling - load model if not loaded
+      if (!llmModelInfo?.loaded) {
+        await handleLoadModel();
+      }
+      setLlmEnabled(true);
+    } else {
+      // Disabling
+      setLlmEnabled(false);
+      setReasoning(null);
+    }
+  };
+
+  const handleReason = async (query: string, results: HybridResult[]) => {
+    if (!llmModelInfo?.loaded) return;
+
+    setLlmLoading(true);
+    setError(null);
+
+    try {
+      const llmClient = getLlmClient();
+
+      // Take top 5 results as context
+      const snippets = results.slice(0, 5).map(r => ({
+        gid: r.gid,
+        pageNo: r.pageNo,
+        title: r.title,
+        text: r.snippet || '',
+        score: r.scores.final
+      }));
+
+      const response = await llmClient.reason({
+        question: query,
+        snippets,
+        maxTokens: 256,
+        temperature: 0.7
+      });
+
+      setReasoning(response);
+      console.log('Reasoning complete:', response);
+    } catch (err) {
+      setError(String(err));
+      console.error('Reasoning failed:', err);
+    } finally {
+      setLlmLoading(false);
     }
   };
 
@@ -110,6 +200,29 @@ export function App() {
                   </>
                 )}
               </dl>
+
+              {/* LLM Toggle */}
+              <div className="llm-toggle">
+                <label className="toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={llmEnabled}
+                    onChange={handleToggleLlm}
+                    disabled={llmLoading}
+                  />
+                  <span className="toggle-text">
+                    🤖 Enable LLM Reasoning (Qwen 0.5B)
+                  </span>
+                </label>
+                {llmModelInfo?.loaded && (
+                  <span className="model-status">✅ Model loaded</span>
+                )}
+                {llmProgress && (
+                  <div className="llm-progress">
+                    {llmProgress.message} ({(llmProgress.progress * 100).toFixed(0)}%)
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="search-section">
@@ -165,6 +278,41 @@ export function App() {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* LLM Reasoning Output */}
+              {reasoning && (
+                <div className="reasoning-output">
+                  <div className="reasoning-header">
+                    <h4>🤖 LLM Reasoning</h4>
+                    <span className="reasoning-meta">
+                      {reasoning.inferenceTimeMs.toFixed(0)}ms · {reasoning.tokensGenerated} tokens
+                    </span>
+                  </div>
+                  <div className="reasoning-answer">
+                    {reasoning.answer}
+                  </div>
+                  {reasoning.usedSnippets.length > 0 && (
+                    <div className="reasoning-citations">
+                      <strong>📑 Cited sources:</strong>
+                      {reasoning.usedSnippets.map((gid) => {
+                        const result = searchResults?.find(r => r.gid === gid);
+                        return (
+                          <span key={gid} className="citation">
+                            Page {result?.pageNo || '?'}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {llmLoading && !reasoning && (
+                <div className="reasoning-loading">
+                  <div className="spinner"></div>
+                  <p>LLM is reasoning...</p>
                 </div>
               )}
             </div>

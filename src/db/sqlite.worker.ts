@@ -15,9 +15,7 @@ import type {
   VerificationResult
 } from './types';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { QUERIES, cosineSimilarity, normalizeScores, unpackVector, parseJsonSafe, sha256, DEFAULT_FUSION_WEIGHTS } from './queries';
-
-const OPFS_PATH = '/capsules';
+import { QUERIES, cosineSimilarity, unpackVector, parseJsonSafe, sha256, DEFAULT_FUSION_WEIGHTS } from './queries';
 const REQUIRED_TABLES = [
   'sqlar',
   'meta_index',

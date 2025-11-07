@@ -1,4 +1,4 @@
-import type { FtsResult, VectorResult, HybridResult, EntityFacet, PageInfo, Checkpoint, VerificationResult, FusionWeights } from './types';
+import type { FusionWeights } from './types';
 
 // Default fusion weights for hybrid search
 export const DEFAULT_FUSION_WEIGHTS: FusionWeights = {
@@ -168,9 +168,9 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   let normB = 0;
 
   for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
+    dotProduct += a[i]! * b[i]!;
+    normA += a[i]! * a[i]!;
+    normB += b[i]! * b[i]!;
   }
 
   const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
