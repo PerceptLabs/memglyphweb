@@ -10,7 +10,9 @@ import type {
   PageInfo,
   Checkpoint,
   VerificationResult,
-  FusionWeights
+  FusionWeights,
+  GraphNode,
+  GraphEdge
 } from './types';
 
 export class DbClient {
@@ -162,6 +164,21 @@ export class DbClient {
   async getCheckpoints(): Promise<Checkpoint[]> {
     return this.sendRequest<Checkpoint[]>({
       type: 'GET_CHECKPOINTS'
+    });
+  }
+
+  async graphHops(
+    seedGid: string,
+    predicate?: string,
+    maxHops?: number,
+    limit?: number
+  ): Promise<{ nodes: GraphNode[]; edges: GraphEdge[]; distances: Record<string, number> }> {
+    return this.sendRequest<{ nodes: GraphNode[]; edges: GraphEdge[]; distances: Record<string, number> }>({
+      type: 'GRAPH_HOPS',
+      seedGid,
+      predicate,
+      maxHops,
+      limit
     });
   }
 

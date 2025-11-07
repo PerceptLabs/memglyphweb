@@ -594,6 +594,106 @@ function getCheckpoints(): RpcResponse<Checkpoint[]> {
   }
 }
 
+// Graph Hops (BFS traversal)
+function graphHops(
+  seedGid: string,
+  predicate?: string,
+  maxHops: number = 3,
+  limit: number = 50
+): RpcResponse<{ nodes: GraphNode[]; edges: GraphEdge[]; distances: Record<string, number> }> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  try {
+    const nodes: GraphNode[] = [];
+    const edges: GraphEdge[] = [];
+    const distances: Record<string, number> = {};
+    const visited = new Set<string>();
+    const queue: Array<{ gid: string; distance: number }> = [];
+
+    // Start BFS from seed
+    queue.push({ gid: seedGid, distance: 0 });
+    distances[seedGid] = 0;
+
+    while (queue.length > 0 && nodes.length < limit) {
+      const { gid, distance } = queue.shift()!;
+
+      // Skip if already visited or exceeded max hops
+      if (visited.has(gid) || distance > maxHops) {
+        continue;
+      }
+
+      visited.add(gid);
+
+      // Get node info
+      const nodeStmt = db.prepare('SELECT gid, page_no, title FROM meta_index WHERE gid = ?');
+      try {
+        nodeStmt.bind([gid]);
+        if (nodeStmt.step()) {
+          const row = nodeStmt.get([]);
+          nodes.push({
+            gid: row[0],
+            pageNo: row[1],
+            title: row[2]
+          });
+        }
+      } finally {
+        nodeStmt.finalize();
+      }
+
+      // Get neighbors (if not at max hops)
+      if (distance < maxHops) {
+        const edgeStmt = db.prepare(`
+          SELECT
+            n2.gid,
+            e.pred,
+            e.weight
+          FROM node_index n1
+          JOIN edges e ON e.fromNode = n1.node_id
+          JOIN node_index n2 ON n2.node_id = e.toNode
+          WHERE n1.gid = ?
+          ${predicate ? 'AND e.pred = ?' : ''}
+          ORDER BY e.weight DESC
+        `);
+
+        try {
+          if (predicate) {
+            edgeStmt.bind([gid, predicate]);
+          } else {
+            edgeStmt.bind([gid]);
+          }
+
+          while (edgeStmt.step()) {
+            const row = edgeStmt.get([]);
+            const neighborGid = row[0];
+            const pred = row[1];
+            const weight = row[2];
+
+            // Add edge
+            edges.push({
+              fromGid: gid,
+              toGid: neighborGid,
+              predicate: pred,
+              weight
+            });
+
+            // Add to queue if not visited
+            if (!visited.has(neighborGid) && !(neighborGid in distances)) {
+              distances[neighborGid] = distance + 1;
+              queue.push({ gid: neighborGid, distance: distance + 1 });
+            }
+          }
+        } finally {
+          edgeStmt.finalize();
+        }
+      }
+    }
+
+    return { ok: true, data: { nodes, edges, distances } };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
 // Handle RPC request
 async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
   try {
@@ -632,7 +732,12 @@ async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
         return getCheckpoints();
 
       case 'GRAPH_HOPS':
-        return { ok: false, error: 'GRAPH_HOPS not yet implemented' };
+        return graphHops(
+          request.seedGid,
+          request.predicate,
+          request.maxHops || 3,
+          request.limit || 50
+        );
 
       default:
         return { ok: false, error: `Unknown request type: ${(request as any).type}` };

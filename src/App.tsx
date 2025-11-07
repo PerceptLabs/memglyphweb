@@ -1,8 +1,10 @@
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import { getDbClient } from './db/client';
 import { getLlmClient, QWEN_MODELS } from './db/llm-client';
-import type { CapsuleInfo, HybridResult } from './db/types';
+import type { CapsuleInfo, HybridResult, EntityFacet, FtsResult } from './db/types';
 import type { LlmModelInfo, ReasoningResponse, LlmProgress } from './db/llm-types';
+
+type SearchMode = 'fts' | 'hybrid' | 'graph';
 
 export function App() {
   const [capsuleInfo, setCapsuleInfo] = useState<CapsuleInfo | null>(null);
@@ -11,12 +13,34 @@ export function App() {
   const [searchResults, setSearchResults] = useState<HybridResult[] | null>(null);
   const [lastQuery, setLastQuery] = useState<string>('');
 
+  // Search mode and filters
+  const [searchMode, setSearchMode] = useState<SearchMode>('hybrid');
+  const [entities, setEntities] = useState<EntityFacet[]>([]);
+  const [selectedEntityType, setSelectedEntityType] = useState<string | null>(null);
+  const [showEntityPanel, setShowEntityPanel] = useState(false);
+
   // LLM state
   const [llmEnabled, setLlmEnabled] = useState(false);
   const [llmModelInfo, setLlmModelInfo] = useState<LlmModelInfo | null>(null);
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmProgress, setLlmProgress] = useState<LlmProgress | null>(null);
   const [reasoning, setReasoning] = useState<ReasoningResponse | null>(null);
+
+  // Load entities when capsule is opened
+  useEffect(() => {
+    if (capsuleInfo) {
+      const loadEntities = async () => {
+        try {
+          const dbClient = getDbClient();
+          const entityList = await dbClient.listEntities(undefined, 50);
+          setEntities(entityList);
+        } catch (err) {
+          console.error('Failed to load entities:', err);
+        }
+      };
+      loadEntities();
+    }
+  }, [capsuleInfo]);
 
   const handleOpenDemo = async () => {
     setLoading(true);
@@ -45,7 +69,63 @@ export function App() {
 
     try {
       const dbClient = getDbClient();
-      const results = await dbClient.searchHybrid(query, 10);
+      let results: HybridResult[] = [];
+
+      // Search based on mode
+      if (searchMode === 'fts') {
+        // FTS-only search
+        const ftsResults = await dbClient.searchFts(query, 10);
+        // Convert FtsResult to HybridResult format
+        results = ftsResults.map((r: FtsResult) => ({
+          gid: r.gid,
+          pageNo: r.pageNo,
+          title: r.title,
+          snippet: r.snippet,
+          scores: {
+            fts: r.score,
+            vector: 0,
+            entity: 0,
+            graph: 0,
+            final: r.score
+          }
+        }));
+      } else if (searchMode === 'hybrid') {
+        // Hybrid search (default)
+        results = await dbClient.searchHybrid(query, 10);
+      } else if (searchMode === 'graph') {
+        // Graph-based search: Start from FTS, then expand via graph
+        const ftsResults = await dbClient.searchFts(query, 3);
+
+        if (ftsResults.length > 0) {
+          // Use top FTS result as seed for graph traversal
+          const seedGid = ftsResults[0].gid;
+          const graphData = await dbClient.graphHops(seedGid, undefined, 2, 10);
+
+          // Convert graph nodes to HybridResult format
+          results = graphData.nodes.map(node => {
+            const distance = graphData.distances[node.gid] || 0;
+            const ftsMatch = ftsResults.find(r => r.gid === node.gid);
+
+            return {
+              gid: node.gid,
+              pageNo: node.pageNo,
+              title: node.title,
+              snippet: ftsMatch?.snippet || null,
+              scores: {
+                fts: ftsMatch?.score || 0,
+                vector: 0,
+                entity: 0,
+                graph: 1.0 / (distance + 1), // Closer nodes score higher
+                final: (ftsMatch?.score || 0) * 0.3 + (1.0 / (distance + 1)) * 0.7
+              }
+            };
+          });
+
+          // Sort by final score
+          results.sort((a, b) => b.scores.final - a.scores.final);
+        }
+      }
+
       setSearchResults(results);
       console.log('Search results:', results);
 
@@ -226,10 +306,80 @@ export function App() {
             </div>
 
             <div className="search-section">
-              <h3>🔍 Hybrid Search</h3>
+              <div className="search-header">
+                <h3>🔍 Search</h3>
+                <button
+                  className="btn-secondary btn-entities"
+                  onClick={() => setShowEntityPanel(!showEntityPanel)}
+                >
+                  {showEntityPanel ? 'Hide' : 'Show'} Entities ({entities.length})
+                </button>
+              </div>
+
+              {/* Search Mode Toggle */}
+              <div className="search-mode-toggle">
+                <button
+                  className={`mode-btn ${searchMode === 'fts' ? 'active' : ''}`}
+                  onClick={() => setSearchMode('fts')}
+                >
+                  📝 FTS Only
+                </button>
+                <button
+                  className={`mode-btn ${searchMode === 'hybrid' ? 'active' : ''}`}
+                  onClick={() => setSearchMode('hybrid')}
+                >
+                  ⚡ Hybrid
+                </button>
+                <button
+                  className={`mode-btn ${searchMode === 'graph' ? 'active' : ''}`}
+                  onClick={() => setSearchMode('graph')}
+                >
+                  🕸️ Graph
+                </button>
+              </div>
+
               <p className="search-hint">
                 Try searching: <em>"vector search"</em>, <em>"LEANN"</em>, <em>"SQLite"</em>, or <em>"hybrid retrieval"</em>
               </p>
+
+              {/* Entity Filter Panel */}
+              {showEntityPanel && entities.length > 0 && (
+                <div className="entity-panel">
+                  <h4>Filter by Entity Type</h4>
+                  <div className="entity-filters">
+                    <button
+                      className={`entity-filter ${selectedEntityType === null ? 'active' : ''}`}
+                      onClick={() => setSelectedEntityType(null)}
+                    >
+                      All ({entities.reduce((sum, e) => sum + e.count, 0)})
+                    </button>
+                    {Array.from(new Set(entities.map(e => e.entityType))).map(type => {
+                      const count = entities.filter(e => e.entityType === type).reduce((sum, e) => sum + e.count, 0);
+                      return (
+                        <button
+                          key={type}
+                          className={`entity-filter ${selectedEntityType === type ? 'active' : ''}`}
+                          onClick={() => setSelectedEntityType(type)}
+                        >
+                          {type} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="entity-list">
+                    {entities
+                      .filter(e => !selectedEntityType || e.entityType === selectedEntityType)
+                      .slice(0, 20)
+                      .map(entity => (
+                        <div key={`${entity.entityType}-${entity.normalizedValue}`} className="entity-item">
+                          <span className="entity-type">{entity.entityType}</span>
+                          <span className="entity-value">{entity.normalizedValue}</span>
+                          <span className="entity-count">{entity.count}</span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
 
               <form onSubmit={(e) => {
                 e.preventDefault();
@@ -248,7 +398,7 @@ export function App() {
                     disabled={loading}
                   />
                   <button type="submit" className="btn-search" disabled={loading}>
-                    Search
+                    {loading ? 'Searching...' : 'Search'}
                   </button>
                 </div>
               </form>
