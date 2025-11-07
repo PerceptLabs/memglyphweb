@@ -1,11 +1,13 @@
 import { useState } from 'preact/hooks';
 import { getDbClient } from './db/client';
-import type { CapsuleInfo } from './db/types';
+import type { CapsuleInfo, HybridResult } from './db/types';
 
 export function App() {
   const [capsuleInfo, setCapsuleInfo] = useState<CapsuleInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<HybridResult[] | null>(null);
+  const [lastQuery, setLastQuery] = useState<string>('');
 
   const handleOpenDemo = async () => {
     setLoading(true);
@@ -19,6 +21,26 @@ export function App() {
     } catch (err) {
       setError(String(err));
       console.error('Failed to open capsule:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = async (query: string) => {
+    if (!capsuleInfo) return;
+
+    setLoading(true);
+    setError(null);
+    setLastQuery(query);
+
+    try {
+      const dbClient = getDbClient();
+      const results = await dbClient.searchHybrid(query, 10);
+      setSearchResults(results);
+      console.log('Search results:', results);
+    } catch (err) {
+      setError(String(err));
+      console.error('Search failed:', err);
     } finally {
       setLoading(false);
     }
@@ -91,8 +113,60 @@ export function App() {
             </div>
 
             <div className="search-section">
-              <h3>Search (Coming Soon)</h3>
-              <p>FTS + Vector + Entity + Graph hybrid search will appear here.</p>
+              <h3>🔍 Hybrid Search</h3>
+              <p className="search-hint">
+                Try searching: <em>"vector search"</em>, <em>"LEANN"</em>, <em>"SQLite"</em>, or <em>"hybrid retrieval"</em>
+              </p>
+
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const formData = new FormData(e.currentTarget);
+                const query = formData.get('query') as string;
+                if (query.trim()) {
+                  handleSearch(query.trim());
+                }
+              }}>
+                <div className="search-bar">
+                  <input
+                    type="text"
+                    name="query"
+                    placeholder="Search the capsule..."
+                    className="search-input"
+                    disabled={loading}
+                  />
+                  <button type="submit" className="btn-search" disabled={loading}>
+                    Search
+                  </button>
+                </div>
+              </form>
+
+              {searchResults && (
+                <div className="search-results">
+                  <p className="results-header">
+                    Found {searchResults.length} results for <strong>"{lastQuery}"</strong>
+                  </p>
+                  {searchResults.map((result) => (
+                    <div key={result.gid} className="result-item">
+                      <div className="result-header">
+                        <span className="result-page">Page {result.pageNo}</span>
+                        <span className="result-score">Score: {result.scores.final.toFixed(3)}</span>
+                      </div>
+                      <h4 className="result-title">{result.title}</h4>
+                      {result.snippet && (
+                        <p
+                          className="result-snippet"
+                          dangerouslySetInnerHTML={{ __html: result.snippet }}
+                        />
+                      )}
+                      <div className="result-scores">
+                        <span>FTS: {result.scores.fts.toFixed(2)}</span>
+                        <span>Entity: {result.scores.entity.toFixed(2)}</span>
+                        <span>Graph: {result.scores.graph.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

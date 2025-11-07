@@ -1,7 +1,21 @@
 /// <reference lib="webworker" />
 
-import type { WorkerRequest, WorkerResponse, RpcRequest, RpcResponse, CapsuleInfo } from './types';
+import type {
+  WorkerRequest,
+  WorkerResponse,
+  RpcRequest,
+  RpcResponse,
+  CapsuleInfo,
+  FtsResult,
+  VectorResult,
+  HybridResult,
+  EntityFacet,
+  PageInfo,
+  Checkpoint,
+  VerificationResult
+} from './types';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
+import { QUERIES, cosineSimilarity, normalizeScores, unpackVector, parseJsonSafe, sha256, DEFAULT_FUSION_WEIGHTS } from './queries';
 
 const OPFS_PATH = '/capsules';
 const REQUIRED_TABLES = [
@@ -224,6 +238,364 @@ function closeCapsule(): RpcResponse<void> {
   return { ok: false, error: 'No database open' };
 }
 
+// FTS Search
+function searchFts(query: string, limit: number): RpcResponse<FtsResult[]> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  const results: FtsResult[] = [];
+  const stmt = db.prepare(QUERIES.FTS_SEARCH);
+
+  try {
+    stmt.bind([query, limit]);
+
+    while (stmt.step()) {
+      const row = stmt.get([]);
+      results.push({
+        gid: row[0],
+        pageNo: row[1],
+        title: row[2],
+        snippet: row[3],
+        rank: row[4],
+        score: row[5]
+      });
+    }
+
+    return { ok: true, data: results };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+// Vector Search (manual cosine similarity)
+function searchVector(queryVector: Float32Array, limit: number): RpcResponse<VectorResult[]> {
+  if (!db) return { ok: false, error: 'No database open' };
+  if (!currentCapsuleInfo?.hasVectors) {
+    return { ok: false, error: 'No vectors available in capsule' };
+  }
+
+  const results: VectorResult[] = [];
+  const model = currentCapsuleInfo.vectorModel || 'gte-small-384';
+
+  // Get all cached vectors
+  const stmt = db.prepare(QUERIES.GET_ALL_VECTORS);
+
+  try {
+    stmt.bind([model]);
+
+    const candidates: Array<{
+      gid: string;
+      pageNo: number;
+      title: string | null;
+      vector: Float32Array;
+    }> = [];
+
+    while (stmt.step()) {
+      const row = stmt.get([]);
+      const embedding = unpackVector(row[3]);
+      candidates.push({
+        gid: row[0],
+        pageNo: row[1],
+        title: row[2],
+        vector: embedding
+      });
+    }
+
+    // Calculate similarities
+    for (const candidate of candidates) {
+      const similarity = cosineSimilarity(queryVector, candidate.vector);
+      results.push({
+        gid: candidate.gid,
+        pageNo: candidate.pageNo,
+        title: candidate.title,
+        similarity
+      });
+    }
+
+    // Sort by similarity (descending) and limit
+    results.sort((a, b) => b.similarity - a.similarity);
+    results.splice(limit);
+
+    return { ok: true, data: results };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+// Hybrid Search (FTS + Vector + Entity fusion)
+function searchHybrid(query: string, limit: number, weights?: Partial<typeof DEFAULT_FUSION_WEIGHTS>): RpcResponse<HybridResult[]> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  const fusionWeights = { ...DEFAULT_FUSION_WEIGHTS, ...weights };
+
+  try {
+    // Step 1: FTS Search
+    const ftsResponse = searchFts(query, Math.min(limit * 3, 50));
+    if (!ftsResponse.ok) return ftsResponse as RpcResponse<HybridResult[]>;
+    const ftsResults = ftsResponse.data!;
+
+    // Build candidate map
+    const candidates = new Map<string, {
+      gid: string;
+      pageNo: number;
+      title: string | null;
+      snippet: string | null;
+      ftsScore: number;
+      vectorScore: number;
+      entityScore: number;
+      graphScore: number;
+    }>();
+
+    // Populate from FTS results
+    for (const result of ftsResults) {
+      candidates.set(result.gid, {
+        gid: result.gid,
+        pageNo: result.pageNo,
+        title: result.title,
+        snippet: result.snippet,
+        ftsScore: result.score,
+        vectorScore: 0,
+        entityScore: 0,
+        graphScore: 0
+      });
+    }
+
+    // Step 2: Entity Boosting (simple: count matching entities)
+    const entityQuery = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    if (entityQuery.length > 0) {
+      for (const [gid, candidate] of candidates) {
+        const entStmt = db.prepare(QUERIES.GET_PAGE_ENTITIES);
+        try {
+          entStmt.bind([gid]);
+          let entityHits = 0;
+
+          while (entStmt.step()) {
+            const row = entStmt.get([]);
+            const entityText = String(row[1]).toLowerCase();
+            for (const term of entityQuery) {
+              if (entityText.includes(term)) {
+                entityHits++;
+                break;
+              }
+            }
+          }
+
+          candidate.entityScore = Math.min(entityHits / 3, 1); // Normalize to 0-1
+        } finally {
+          entStmt.finalize();
+        }
+      }
+    }
+
+    // Step 3: Graph Boosting (neighbor hints)
+    // For top N candidates, check if they're connected
+    const topGids = Array.from(candidates.keys()).slice(0, Math.min(10, limit));
+    for (const gid of topGids) {
+      const candidate = candidates.get(gid)!;
+      const graphStmt = db.prepare(QUERIES.GET_GRAPH_NEIGHBORS);
+      try {
+        graphStmt.bind([gid, 5]);
+        let neighborCount = 0;
+
+        while (graphStmt.step()) {
+          const row = graphStmt.get([]);
+          const neighborGid = row[0];
+          if (candidates.has(neighborGid)) {
+            neighborCount++;
+          }
+        }
+
+        candidate.graphScore = Math.min(neighborCount / 3, 1); // Normalize
+      } finally {
+        graphStmt.finalize();
+      }
+    }
+
+    // Step 4: Fusion Ranking
+    const finalResults: HybridResult[] = [];
+
+    for (const [_, candidate] of candidates) {
+      const finalScore =
+        fusionWeights.fts * candidate.ftsScore +
+        fusionWeights.vector * candidate.vectorScore +
+        fusionWeights.entity * candidate.entityScore +
+        fusionWeights.graph * candidate.graphScore;
+
+      finalResults.push({
+        gid: candidate.gid,
+        pageNo: candidate.pageNo,
+        title: candidate.title,
+        snippet: candidate.snippet,
+        scores: {
+          fts: candidate.ftsScore,
+          vector: candidate.vectorScore,
+          entity: candidate.entityScore,
+          graph: candidate.graphScore,
+          final: finalScore
+        }
+      });
+    }
+
+    // Sort by final score
+    finalResults.sort((a, b) => b.scores.final - a.scores.final);
+    finalResults.splice(limit);
+
+    return { ok: true, data: finalResults };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  }
+}
+
+// List Entities
+function listEntities(entityType?: string, limit: number = 100): RpcResponse<EntityFacet[]> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  const results: EntityFacet[] = [];
+  const stmt = db.prepare(QUERIES.LIST_ENTITY_FACETS);
+
+  try {
+    stmt.bind([entityType || null, limit]);
+
+    while (stmt.step()) {
+      const row = stmt.get([]);
+      results.push({
+        entityType: row[0],
+        normalizedValue: row[1],
+        count: row[2]
+      });
+    }
+
+    return { ok: true, data: results };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+// Get Page List
+function getPageList(limit: number, offset: number): RpcResponse<PageInfo[]> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  const results: PageInfo[] = [];
+  const stmt = db.prepare(QUERIES.GET_PAGE_LIST);
+
+  try {
+    stmt.bind([limit, offset]);
+
+    while (stmt.step()) {
+      const row = stmt.get([]);
+      results.push({
+        gid: row[0],
+        docId: row[1],
+        pageNo: row[2],
+        title: row[3],
+        tags: row[4],
+        updatedTs: row[5]
+      });
+    }
+
+    return { ok: true, data: results };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+// Get Page Blob
+function getPageBlob(name: string): RpcResponse<Uint8Array> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  const stmt = db.prepare(QUERIES.GET_PAGE_BLOB);
+
+  try {
+    stmt.bind([name]);
+
+    if (stmt.step()) {
+      const row = stmt.get([]);
+      const data = row[0]; // Uint8Array
+      return { ok: true, data };
+    }
+
+    return { ok: false, error: `Blob not found: ${name}` };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+// Verify Page
+async function verifyPage(gid: string): Promise<RpcResponse<VerificationResult>> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  const stmt = db.prepare(QUERIES.VERIFY_PAGE);
+
+  try {
+    stmt.bind([gid]);
+
+    if (stmt.step()) {
+      const row = stmt.get([]);
+      const storedContentSha = row[1];
+      const fullText = row[6];
+
+      // Compute actual SHA
+      const computedSha = await sha256(fullText || '');
+
+      return {
+        ok: true,
+        data: {
+          gid: row[0],
+          contentSha: storedContentSha,
+          expectedSha: computedSha,
+          verified: storedContentSha === computedSha,
+          signer: row[2],
+          signature: row[3],
+          epoch: row[4],
+          merkleRoot: row[5]
+        }
+      };
+    }
+
+    return { ok: false, error: `No receipt found for GID: ${gid}` };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+// Get Checkpoints
+function getCheckpoints(): RpcResponse<Checkpoint[]> {
+  if (!db) return { ok: false, error: 'No database open' };
+
+  const results: Checkpoint[] = [];
+  const stmt = db.prepare(QUERIES.GET_CHECKPOINTS);
+
+  try {
+    while (stmt.step()) {
+      const row = stmt.get([]);
+      results.push({
+        epoch: row[0],
+        merkleRoot: row[1],
+        pagesCount: row[2],
+        createdTs: row[4],
+        anchors: parseJsonSafe<string[]>(row[3])
+      });
+    }
+
+    return { ok: true, data: results };
+  } catch (error) {
+    return { ok: false, error: String(error) };
+  } finally {
+    stmt.finalize();
+  }
+}
+
 // Handle RPC request
 async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
   try {
@@ -237,17 +609,32 @@ async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
       case 'CLOSE':
         return closeCapsule();
 
-      // TODO: Implement other operations
       case 'FTS_SEARCH':
+        return searchFts(request.query, request.limit || 20);
+
       case 'VECTOR_SEARCH':
+        return searchVector(request.queryVector, request.limit || 20);
+
       case 'HYBRID_SEARCH':
+        return searchHybrid(request.query, request.limit || 20, request.weights);
+
       case 'LIST_ENTITIES':
-      case 'GRAPH_HOPS':
-      case 'GET_PAGE_BLOB':
+        return listEntities(request.entityType, request.limit || 100);
+
       case 'GET_PAGE_LIST':
+        return getPageList(request.limit || 100, request.offset || 0);
+
+      case 'GET_PAGE_BLOB':
+        return getPageBlob(request.name);
+
       case 'VERIFY_PAGE':
+        return await verifyPage(request.gid);
+
       case 'GET_CHECKPOINTS':
-        return { ok: false, error: `Operation ${request.type} not yet implemented` };
+        return getCheckpoints();
+
+      case 'GRAPH_HOPS':
+        return { ok: false, error: 'GRAPH_HOPS not yet implemented' };
 
       default:
         return { ok: false, error: `Unknown request type: ${(request as any).type}` };
