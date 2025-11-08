@@ -7,6 +7,7 @@ import { useSearch, SearchPanel } from './features/search';
 import { useEntities, EntityPanel, EntityToggleButton } from './features/entities';
 import { useLlm, LlmToggle, ReasoningOutput } from './features/llm';
 import { FilePicker } from './features/open/FilePicker';
+import { CapsuleView } from './features/capsule';
 
 // GCUI modules
 import { loadGcuiContext } from './gcui/v1/detector';
@@ -184,102 +185,11 @@ export function App() {
             <PageRouter context={gcuiContext} />
           </div>
         ) : (
-          // Legacy Mode - Traditional search UI
-          <div className="capsule-view">
-            <div className="capsule-info">
-              <h2>📦 {capsuleInfo.fileName}</h2>
-              <dl>
-                <dt>File Size:</dt>
-                <dd>{(capsuleInfo.fileSize / 1024).toFixed(1)} KB</dd>
-
-                <dt>Doc ID:</dt>
-                <dd><code>{capsuleInfo.docId.slice(0, 24)}...</code></dd>
-
-                <dt>Pages:</dt>
-                <dd>{capsuleInfo.pageCount}</dd>
-
-                <dt>Entities:</dt>
-                <dd>{capsuleInfo.entityCount}</dd>
-
-                <dt>Graph Edges:</dt>
-                <dd>{capsuleInfo.edgeCount}</dd>
-
-                {capsuleInfo.hasVectors && (
-                  <>
-                    <dt>Vectors:</dt>
-                    <dd>
-                      ✅ {capsuleInfo.vectorModel} ({capsuleInfo.vectorDim}-dim)
-                    </dd>
-                  </>
-                )}
-              </dl>
-
-              {/* LLM Toggle */}
-              {config.features.llm.enabled && (
-                <LlmToggle
-                  enabled={llm.enabled}
-                  loading={llm.loading}
-                  modelLoaded={llm.modelInfo?.loaded || false}
-                  progress={llm.progress}
-                  error={llm.error}
-                  onToggle={llm.toggle}
-                />
-              )}
-            </div>
-
-            <div className="search-section">
-              <div className="search-header">
-                <h3>🔍 Search</h3>
-                <EntityToggleButton
-                  show={showEntityPanel}
-                  entityCount={entities.entities.length}
-                  onToggle={() => setShowEntityPanel(!showEntityPanel)}
-                />
-              </div>
-
-              {/* Search Panel */}
-              <SearchPanel
-                mode={search.mode}
-                results={search.results}
-                lastQuery={search.lastQuery}
-                loading={search.loading || loading}
-                onSearch={handleSearch}
-                onModeChange={search.changeMode}
-                showModeToggle={config.features.search.showModeToggle}
-                placeholder="Search the capsule..."
-                searchHint='Try searching: "vector search", "LEANN", "SQLite", or "hybrid retrieval"'
-              />
-
-              {/* Entity Panel */}
-              <EntityPanel
-                entities={entities.entities}
-                types={entities.types}
-                selectedType={entities.selectedType}
-                totalCount={entities.totalCount}
-                onSelectType={entities.selectType}
-                getTypeCount={entities.getTypeCount}
-                show={showEntityPanel}
-                maxDisplay={20}
-              />
-
-              {/* LLM Reasoning Output */}
-              {config.features.llm.enabled && llm.reasoning && (
-                <ReasoningOutput
-                  reasoning={llm.reasoning}
-                  searchResults={search.results}
-                  loading={llm.loading}
-                />
-              )}
-
-              {/* LLM Loading State */}
-              {config.features.llm.enabled && llm.loading && !llm.reasoning && (
-                <div className="reasoning-loading">
-                  <div className="spinner"></div>
-                  <p>LLM is reasoning...</p>
-                </div>
-              )}
-            </div>
-          </div>
+          // Capsule Mode - Integrated search UI with layout
+          <CapsuleView
+            capsuleInfo={capsuleInfo}
+            onClose={() => setCapsuleInfo(null)}
+          />
         )}
       </main>
 

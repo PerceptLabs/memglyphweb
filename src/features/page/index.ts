@@ -18,3 +18,13 @@ export type {
   PageBrowserProps,
   PageBrowserPanelProps,
 } from './PageBrowser';
+
+export {
+  PagePreview,
+  PagePreviewPanel,
+} from './PagePreview';
+
+export type {
+  PagePreviewProps,
+  PagePreviewPanelProps,
+} from './PagePreview';

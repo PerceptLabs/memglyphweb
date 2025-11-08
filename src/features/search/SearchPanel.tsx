@@ -79,16 +79,22 @@ export function SearchBar({ onSearch, loading, placeholder }: SearchBarProps) {
 export interface SearchResultsProps {
   results: HybridResult[];
   query: string;
+  onResultClick?: (gid: string) => void;
 }
 
-export function SearchResults({ results, query }: SearchResultsProps) {
+export function SearchResults({ results, query, onResultClick }: SearchResultsProps) {
   return (
     <div className="search-results">
       <p className="results-header">
         Found {results.length} results for <strong>"{query}"</strong>
       </p>
       {results.map((result) => (
-        <div key={result.gid} className="result-item">
+        <div
+          key={result.gid}
+          className={`result-item ${onResultClick ? 'result-item-clickable' : ''}`}
+          onClick={() => onResultClick?.(result.gid)}
+          style={{ cursor: onResultClick ? 'pointer' : 'default' }}
+        >
           <div className="result-header">
             <span className="result-page">Page {result.pageNo}</span>
             <span className="result-score">Score: {result.scores.final.toFixed(3)}</span>
@@ -118,6 +124,7 @@ export interface SearchPanelProps {
   loading: boolean;
   onSearch: (query: string) => void;
   onModeChange: (mode: SearchMode) => void;
+  onResultClick?: (gid: string) => void;
   showModeToggle?: boolean;
   placeholder?: string;
   searchHint?: string;
@@ -130,6 +137,7 @@ export function SearchPanel({
   loading,
   onSearch,
   onModeChange,
+  onResultClick,
   showModeToggle = true,
   placeholder,
   searchHint,
@@ -151,7 +159,7 @@ export function SearchPanel({
 
       {/* Search Results */}
       {results && results.length > 0 && (
-        <SearchResults results={results} query={lastQuery} />
+        <SearchResults results={results} query={lastQuery} onResultClick={onResultClick} />
       )}
 
       {/* No Results */}
