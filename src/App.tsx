@@ -1,44 +1,40 @@
 import { useState, useEffect } from 'preact/hooks';
 import { getDbClient } from './db/client';
-import { getLlmClient, QWEN_MODELS } from './db/llm-client';
-import type { CapsuleInfo, HybridResult, EntityFacet, FtsResult } from './db/types';
-import type { LlmModelInfo, ReasoningResponse, LlmProgress } from './db/llm-types';
+import type { CapsuleInfo } from './db/types';
 
-type SearchMode = 'fts' | 'hybrid' | 'graph';
+// Feature modules
+import { useSearch, SearchPanel } from './features/search';
+import { useEntities, EntityPanel, EntityToggleButton } from './features/entities';
+import { useLlm, LlmToggle, ReasoningOutput } from './features/llm';
+
+// Configuration
+import { getConfig } from './config/features';
 
 export function App() {
+  const config = getConfig();
+
   const [capsuleInfo, setCapsuleInfo] = useState<CapsuleInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchResults, setSearchResults] = useState<HybridResult[] | null>(null);
-  const [lastQuery, setLastQuery] = useState<string>('');
-
-  // Search mode and filters
-  const [searchMode, setSearchMode] = useState<SearchMode>('hybrid');
-  const [entities, setEntities] = useState<EntityFacet[]>([]);
-  const [selectedEntityType, setSelectedEntityType] = useState<string | null>(null);
   const [showEntityPanel, setShowEntityPanel] = useState(false);
 
-  // LLM state
-  const [llmEnabled, setLlmEnabled] = useState(false);
-  const [llmModelInfo, setLlmModelInfo] = useState<LlmModelInfo | null>(null);
-  const [llmLoading, setLlmLoading] = useState(false);
-  const [llmProgress, setLlmProgress] = useState<LlmProgress | null>(null);
-  const [reasoning, setReasoning] = useState<ReasoningResponse | null>(null);
+  // Feature hooks
+  const search = useSearch({
+    defaultMode: config.features.search.defaultMode,
+  });
+
+  const entities = useEntities({
+    autoLoad: false, // Load when capsule is opened
+  });
+
+  const llm = useLlm({
+    autoReason: config.features.llm.autoReason,
+  });
 
   // Load entities when capsule is opened
   useEffect(() => {
     if (capsuleInfo) {
-      const loadEntities = async () => {
-        try {
-          const dbClient = getDbClient();
-          const entityList = await dbClient.listEntities(undefined, 50);
-          setEntities(entityList);
-        } catch (err) {
-          console.error('Failed to load entities:', err);
-        }
-      };
-      loadEntities();
+      entities.loadEntities();
     }
   }, [capsuleInfo]);
 
@@ -62,157 +58,20 @@ export function App() {
   const handleSearch = async (query: string) => {
     if (!capsuleInfo) return;
 
-    setLoading(true);
-    setError(null);
-    setLastQuery(query);
-    setReasoning(null); // Clear previous reasoning
+    // Clear previous LLM reasoning
+    llm.clearReasoning();
 
-    try {
-      const dbClient = getDbClient();
-      let results: HybridResult[] = [];
+    // Execute search
+    const results = await search.search(query);
 
-      // Search based on mode
-      if (searchMode === 'fts') {
-        // FTS-only search
-        const ftsResults = await dbClient.searchFts(query, 10);
-        // Convert FtsResult to HybridResult format
-        results = ftsResults.map((r: FtsResult) => ({
-          gid: r.gid,
-          pageNo: r.pageNo,
-          title: r.title,
-          snippet: r.snippet,
-          scores: {
-            fts: r.score,
-            vector: 0,
-            entity: 0,
-            graph: 0,
-            final: r.score
-          }
-        }));
-      } else if (searchMode === 'hybrid') {
-        // Hybrid search (default)
-        results = await dbClient.searchHybrid(query, 10);
-      } else if (searchMode === 'graph') {
-        // Graph-based search: Start from FTS, then expand via graph
-        const ftsResults = await dbClient.searchFts(query, 3);
-
-        if (ftsResults.length > 0) {
-          // Use top FTS result as seed for graph traversal
-          const seedGid = ftsResults[0].gid;
-          const graphData = await dbClient.graphHops(seedGid, undefined, 2, 10);
-
-          // Convert graph nodes to HybridResult format
-          results = graphData.nodes.map(node => {
-            const distance = graphData.distances[node.gid] || 0;
-            const ftsMatch = ftsResults.find(r => r.gid === node.gid);
-
-            return {
-              gid: node.gid,
-              pageNo: node.pageNo,
-              title: node.title,
-              snippet: ftsMatch?.snippet || null,
-              scores: {
-                fts: ftsMatch?.score || 0,
-                vector: 0,
-                entity: 0,
-                graph: 1.0 / (distance + 1), // Closer nodes score higher
-                final: (ftsMatch?.score || 0) * 0.3 + (1.0 / (distance + 1)) * 0.7
-              }
-            };
-          });
-
-          // Sort by final score
-          results.sort((a, b) => b.scores.final - a.scores.final);
-        }
-      }
-
-      setSearchResults(results);
-      console.log('Search results:', results);
-
-      // If LLM is enabled and loaded, automatically reason
-      if (llmEnabled && llmModelInfo?.loaded && results.length > 0) {
-        await handleReason(query, results);
-      }
-    } catch (err) {
-      setError(String(err));
-      console.error('Search failed:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLoadModel = async () => {
-    setLlmLoading(true);
-    setError(null);
-    setLlmProgress(null);
-
-    try {
-      const llmClient = getLlmClient();
-
-      // Set up progress callback
-      llmClient.onProgress((progress) => {
-        setLlmProgress(progress);
-      });
-
-      // Load Qwen 3 0.6B model
-      const modelInfo = await llmClient.loadModel(QWEN_MODELS['0.6b']);
-      setLlmModelInfo(modelInfo);
-      setLlmProgress(null);
-      console.log('Model loaded:', modelInfo);
-    } catch (err) {
-      setError(String(err));
-      console.error('Failed to load model:', err);
-    } finally {
-      setLlmLoading(false);
-    }
-  };
-
-  const handleToggleLlm = async () => {
-    if (!llmEnabled) {
-      // Enabling - load model if not loaded
-      if (!llmModelInfo?.loaded) {
-        await handleLoadModel();
-      }
-      setLlmEnabled(true);
-    } else {
-      // Disabling
-      setLlmEnabled(false);
-      setReasoning(null);
-    }
-  };
-
-  const handleReason = async (query: string, results: HybridResult[]) => {
-    if (!llmModelInfo?.loaded) return;
-
-    setLlmLoading(true);
-    setError(null);
-
-    try {
-      const llmClient = getLlmClient();
-
-      // Take top 5 results as context
-      const snippets = results.slice(0, 5).map(r => ({
-        gid: r.gid,
-        pageNo: r.pageNo,
-        title: r.title,
-        text: r.snippet || '',
-        score: r.scores.final
-      }));
-
-      const response = await llmClient.reason({
-        question: query,
-        snippets,
-        maxTokens: 256,
-        temperature: 0.7
-      });
-
-      setReasoning(response);
-      console.log('Reasoning complete:', response);
-    } catch (err) {
-      setError(String(err));
-      console.error('Reasoning failed:', err);
-    } finally {
-      setLlmLoading(false);
+    // If LLM is enabled and loaded, automatically reason
+    if (
+      config.features.llm.autoReason &&
+      llm.enabled &&
+      llm.modelInfo?.loaded &&
+      results.length > 0
+    ) {
+      await llm.reason(query, results, config.features.llm.maxTokens);
     }
   };
 
@@ -282,184 +141,64 @@ export function App() {
               </dl>
 
               {/* LLM Toggle */}
-              <div className="llm-toggle">
-                <label className="toggle-label">
-                  <input
-                    type="checkbox"
-                    checked={llmEnabled}
-                    onChange={handleToggleLlm}
-                    disabled={llmLoading}
-                  />
-                  <span className="toggle-text">
-                    🤖 Enable LLM Reasoning (Qwen 3 0.6B)
-                  </span>
-                </label>
-                {llmModelInfo?.loaded && (
-                  <span className="model-status">✅ Model loaded</span>
-                )}
-                {llmProgress && (
-                  <div className="llm-progress">
-                    {llmProgress.message} ({(llmProgress.progress * 100).toFixed(0)}%)
-                  </div>
-                )}
-              </div>
+              {config.features.llm.enabled && (
+                <LlmToggle
+                  enabled={llm.enabled}
+                  loading={llm.loading}
+                  modelLoaded={llm.modelInfo?.loaded || false}
+                  progress={llm.progress}
+                  error={llm.error}
+                  onToggle={llm.toggle}
+                />
+              )}
             </div>
 
             <div className="search-section">
               <div className="search-header">
                 <h3>🔍 Search</h3>
-                <button
-                  className="btn-secondary btn-entities"
-                  onClick={() => setShowEntityPanel(!showEntityPanel)}
-                >
-                  {showEntityPanel ? 'Hide' : 'Show'} Entities ({entities.length})
-                </button>
+                <EntityToggleButton
+                  show={showEntityPanel}
+                  entityCount={entities.entities.length}
+                  onToggle={() => setShowEntityPanel(!showEntityPanel)}
+                />
               </div>
 
-              {/* Search Mode Toggle */}
-              <div className="search-mode-toggle">
-                <button
-                  className={`mode-btn ${searchMode === 'fts' ? 'active' : ''}`}
-                  onClick={() => setSearchMode('fts')}
-                >
-                  📝 FTS Only
-                </button>
-                <button
-                  className={`mode-btn ${searchMode === 'hybrid' ? 'active' : ''}`}
-                  onClick={() => setSearchMode('hybrid')}
-                >
-                  ⚡ Hybrid
-                </button>
-                <button
-                  className={`mode-btn ${searchMode === 'graph' ? 'active' : ''}`}
-                  onClick={() => setSearchMode('graph')}
-                >
-                  🕸️ Graph
-                </button>
-              </div>
+              {/* Search Panel */}
+              <SearchPanel
+                mode={search.mode}
+                results={search.results}
+                lastQuery={search.lastQuery}
+                loading={search.loading || loading}
+                onSearch={handleSearch}
+                onModeChange={search.changeMode}
+                showModeToggle={config.features.search.showModeToggle}
+                placeholder="Search the capsule..."
+                searchHint='Try searching: "vector search", "LEANN", "SQLite", or "hybrid retrieval"'
+              />
 
-              <p className="search-hint">
-                Try searching: <em>"vector search"</em>, <em>"LEANN"</em>, <em>"SQLite"</em>, or <em>"hybrid retrieval"</em>
-              </p>
-
-              {/* Entity Filter Panel */}
-              {showEntityPanel && entities.length > 0 && (
-                <div className="entity-panel">
-                  <h4>Filter by Entity Type</h4>
-                  <div className="entity-filters">
-                    <button
-                      className={`entity-filter ${selectedEntityType === null ? 'active' : ''}`}
-                      onClick={() => setSelectedEntityType(null)}
-                    >
-                      All ({entities.reduce((sum, e) => sum + e.count, 0)})
-                    </button>
-                    {Array.from(new Set(entities.map(e => e.entityType))).map(type => {
-                      const count = entities.filter(e => e.entityType === type).reduce((sum, e) => sum + e.count, 0);
-                      return (
-                        <button
-                          key={type}
-                          className={`entity-filter ${selectedEntityType === type ? 'active' : ''}`}
-                          onClick={() => setSelectedEntityType(type)}
-                        >
-                          {type} ({count})
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="entity-list">
-                    {entities
-                      .filter(e => !selectedEntityType || e.entityType === selectedEntityType)
-                      .slice(0, 20)
-                      .map(entity => (
-                        <div key={`${entity.entityType}-${entity.normalizedValue}`} className="entity-item">
-                          <span className="entity-type">{entity.entityType}</span>
-                          <span className="entity-value">{entity.normalizedValue}</span>
-                          <span className="entity-count">{entity.count}</span>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              )}
-
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                const formData = new FormData(e.currentTarget);
-                const query = formData.get('query') as string;
-                if (query.trim()) {
-                  handleSearch(query.trim());
-                }
-              }}>
-                <div className="search-bar">
-                  <input
-                    type="text"
-                    name="query"
-                    placeholder="Search the capsule..."
-                    className="search-input"
-                    disabled={loading}
-                  />
-                  <button type="submit" className="btn-search" disabled={loading}>
-                    {loading ? 'Searching...' : 'Search'}
-                  </button>
-                </div>
-              </form>
-
-              {searchResults && (
-                <div className="search-results">
-                  <p className="results-header">
-                    Found {searchResults.length} results for <strong>"{lastQuery}"</strong>
-                  </p>
-                  {searchResults.map((result) => (
-                    <div key={result.gid} className="result-item">
-                      <div className="result-header">
-                        <span className="result-page">Page {result.pageNo}</span>
-                        <span className="result-score">Score: {result.scores.final.toFixed(3)}</span>
-                      </div>
-                      <h4 className="result-title">{result.title}</h4>
-                      {result.snippet && (
-                        <p
-                          className="result-snippet"
-                          dangerouslySetInnerHTML={{ __html: result.snippet }}
-                        />
-                      )}
-                      <div className="result-scores">
-                        <span>FTS: {result.scores.fts.toFixed(2)}</span>
-                        <span>Entity: {result.scores.entity.toFixed(2)}</span>
-                        <span>Graph: {result.scores.graph.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* Entity Panel */}
+              <EntityPanel
+                entities={entities.entities}
+                types={entities.types}
+                selectedType={entities.selectedType}
+                totalCount={entities.totalCount}
+                onSelectType={entities.selectType}
+                getTypeCount={entities.getTypeCount}
+                show={showEntityPanel}
+                maxDisplay={20}
+              />
 
               {/* LLM Reasoning Output */}
-              {reasoning && (
-                <div className="reasoning-output">
-                  <div className="reasoning-header">
-                    <h4>🤖 LLM Reasoning</h4>
-                    <span className="reasoning-meta">
-                      {reasoning.inferenceTimeMs.toFixed(0)}ms · {reasoning.tokensGenerated} tokens
-                    </span>
-                  </div>
-                  <div className="reasoning-answer">
-                    {reasoning.answer}
-                  </div>
-                  {reasoning.usedSnippets.length > 0 && (
-                    <div className="reasoning-citations">
-                      <strong>📑 Cited sources:</strong>
-                      {reasoning.usedSnippets.map((gid) => {
-                        const result = searchResults?.find(r => r.gid === gid);
-                        return (
-                          <span key={gid} className="citation">
-                            Page {result?.pageNo || '?'}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+              {config.features.llm.enabled && llm.reasoning && (
+                <ReasoningOutput
+                  reasoning={llm.reasoning}
+                  searchResults={search.results}
+                  loading={llm.loading}
+                />
               )}
 
-              {llmLoading && !reasoning && (
+              {/* LLM Loading State */}
+              {config.features.llm.enabled && llm.loading && !llm.reasoning && (
                 <div className="reasoning-loading">
                   <div className="spinner"></div>
                   <p>LLM is reasoning...</p>
