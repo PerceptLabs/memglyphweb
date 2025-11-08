@@ -7,6 +7,11 @@ import { useSearch, SearchPanel } from './features/search';
 import { useEntities, EntityPanel, EntityToggleButton } from './features/entities';
 import { useLlm, LlmToggle, ReasoningOutput } from './features/llm';
 
+// GCUI modules
+import { loadGcuiContext } from './gcui/v1/detector';
+import type { GcuiContext } from './gcui/v1/types';
+import { PageRouter } from './features/router';
+
 // Configuration
 import { getConfig } from './config/features';
 
@@ -14,6 +19,7 @@ export function App() {
   const config = getConfig();
 
   const [capsuleInfo, setCapsuleInfo] = useState<CapsuleInfo | null>(null);
+  const [gcuiContext, setGcuiContext] = useState<GcuiContext | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showEntityPanel, setShowEntityPanel] = useState(false);
@@ -31,10 +37,35 @@ export function App() {
     autoReason: config.features.llm.autoReason,
   });
 
-  // Load entities when capsule is opened
+  // Load entities and detect GCUI when capsule is opened
   useEffect(() => {
     if (capsuleInfo) {
+      // Load entities for legacy mode
       entities.loadEntities();
+
+      // Detect GCUI capabilities
+      const detectGcui = async () => {
+        try {
+          const dbClient = getDbClient();
+          const context = await loadGcuiContext(dbClient);
+
+          console.log('[GCUI] Detected capabilities:', context.capabilities);
+
+          // Only set context if GCUI mode is detected
+          if (context.capabilities.mode !== 'generic') {
+            setGcuiContext(context);
+            console.log('[GCUI] Rendering in', context.capabilities.mode, 'mode');
+          } else {
+            console.log('[GCUI] No GCUI tables found, using legacy mode');
+            setGcuiContext(null);
+          }
+        } catch (err) {
+          console.warn('[GCUI] Detection failed, using legacy mode:', err);
+          setGcuiContext(null);
+        }
+      };
+
+      detectGcui();
     }
   }, [capsuleInfo]);
 
@@ -110,7 +141,13 @@ export function App() {
               {loading ? 'Opening...' : 'Open Demo Capsule'}
             </button>
           </div>
+        ) : gcuiContext && config.features.gcui.enabled ? (
+          // GCUI Mode - Render as website/dashboard
+          <div className="gcui-mode">
+            <PageRouter context={gcuiContext} />
+          </div>
         ) : (
+          // Legacy Mode - Traditional search UI
           <div className="capsule-view">
             <div className="capsule-info">
               <h2>📦 {capsuleInfo.fileName}</h2>
