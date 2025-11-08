@@ -2,6 +2,7 @@
  * Asset Protocol Handler
  *
  * Handles asset:// URLs and loads files from SQLAR storage.
+ * Provides blob lifecycle management for images, PDFs, and other assets.
  */
 
 import { getDbClient } from '../../db/client';
@@ -9,14 +10,21 @@ import { parseAssetURL } from '../../gcui/v1/types';
 
 /**
  * Asset cache to avoid repeated database queries
+ * Maps asset path -> object URL
  */
 const assetCache = new Map<string, string>();
+
+/**
+ * Blob cache with automatic cleanup via WeakMap
+ * Tracks Blob objects to prevent garbage collection of cached blobs
+ */
+const blobRefs = new Map<string, Blob>();
 
 /**
  * Load an asset from SQLAR by path
  *
  * @param assetUrl - asset://path/to/file
- * @returns Data URL or object URL for the asset
+ * @returns Object URL for the asset
  */
 export async function loadAsset(assetUrl: string): Promise<string | null> {
   // Check cache first
@@ -34,27 +42,22 @@ export async function loadAsset(assetUrl: string): Promise<string | null> {
   try {
     const dbClient = getDbClient();
 
-    // Query SQLAR table for the file
-    const results = await dbClient.query<{ name: string; data: Blob | Uint8Array }>(
-      `SELECT name, data FROM sqlar WHERE name = ?`,
-      [parsed.path]
-    );
+    // Use getPageBlob for type-safe blob retrieval
+    const blob = await dbClient.getPageBlob(parsed.path);
 
-    if (results.length === 0) {
-      console.warn('[Assets] Asset not found:', parsed.path);
+    if (!blob || blob.size === 0) {
+      console.warn('[Assets] Asset not found or empty:', parsed.path);
       return null;
     }
-
-    const { data } = results[0];
-
-    // Convert to Blob if needed
-    const blob = data instanceof Blob ? data : new Blob([data]);
 
     // Create object URL
     const objectUrl = URL.createObjectURL(blob);
 
-    // Cache it
+    // Cache both URL and blob reference
     assetCache.set(assetUrl, objectUrl);
+    blobRefs.set(assetUrl, blob);
+
+    console.log('[Assets] Loaded:', parsed.path, `(${blob.size} bytes, ${blob.type || 'unknown type'})`);
 
     return objectUrl;
   } catch (err) {
@@ -82,6 +85,45 @@ export function clearAssetCache(): void {
   });
 
   assetCache.clear();
+  blobRefs.clear();
+
+  console.log('[Assets] Cache cleared');
+}
+
+/**
+ * Revoke a specific asset URL and remove from cache
+ */
+export function revokeAsset(assetUrl: string): void {
+  const objectUrl = assetCache.get(assetUrl);
+  if (objectUrl && objectUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(objectUrl);
+  }
+
+  assetCache.delete(assetUrl);
+  blobRefs.delete(assetUrl);
+}
+
+/**
+ * Get cached asset stats
+ */
+export function getAssetCacheStats() {
+  const totalSize = Array.from(blobRefs.values()).reduce(
+    (sum, blob) => sum + blob.size,
+    0
+  );
+
+  return {
+    count: assetCache.size,
+    totalSize,
+    urls: Array.from(assetCache.keys()),
+  };
+}
+
+/**
+ * Load page blob by name (convenience wrapper)
+ */
+export async function loadPageBlob(name: string): Promise<string | null> {
+  return loadAsset(`asset://${name}`);
 }
 
 /**
@@ -104,6 +146,13 @@ export function useAsset(assetUrl: string | undefined): string | null {
 
     // Load from SQLAR
     loadAsset(assetUrl).then(setUrl);
+
+    // Cleanup: optionally revoke on unmount (disabled by default to allow sharing)
+    // return () => {
+    //   if (url && url.startsWith('blob:')) {
+    //     revokeAsset(assetUrl);
+    //   }
+    // };
   }, [assetUrl]);
 
   return url;

@@ -1,7 +1,15 @@
 /**
  * Assets Feature Module
  *
- * Asset protocol (asset://) handler for SQLAR files
+ * Asset protocol (asset://) handler for SQLAR files with blob lifecycle management
  */
 
-export { loadAsset, preloadAssets, clearAssetCache, useAsset } from './assetProtocol';
+export {
+  loadAsset,
+  loadPageBlob,
+  preloadAssets,
+  clearAssetCache,
+  revokeAsset,
+  getAssetCacheStats,
+  useAsset,
+} from './assetProtocol';
