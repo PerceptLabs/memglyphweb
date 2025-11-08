@@ -16,6 +16,11 @@ export interface UseSearchOptions {
   maxGraphHops?: number;
 }
 
+export interface EntityFilter {
+  entityType?: string;
+  entityValue?: string;
+}
+
 export function useSearch(options: UseSearchOptions = {}) {
   const {
     defaultMode = 'hybrid',
@@ -28,6 +33,7 @@ export function useSearch(options: UseSearchOptions = {}) {
   const [lastQuery, setLastQuery] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [entityFilter, setEntityFilter] = useState<EntityFilter>({});
 
   /**
    * Execute search based on current mode
@@ -45,7 +51,7 @@ export function useSearch(options: UseSearchOptions = {}) {
 
       switch (mode) {
         case 'fts':
-          searchResults = await searchFts(dbClient, query, maxResults);
+          searchResults = await searchFts(dbClient, query, maxResults, entityFilter);
           break;
 
         case 'hybrid':
@@ -53,7 +59,7 @@ export function useSearch(options: UseSearchOptions = {}) {
           break;
 
         case 'graph':
-          searchResults = await searchGraph(dbClient, query, maxResults, maxGraphHops);
+          searchResults = await searchGraph(dbClient, query, maxResults, maxGraphHops, entityFilter);
           break;
 
         default:
@@ -92,6 +98,23 @@ export function useSearch(options: UseSearchOptions = {}) {
     setResults(null);
   };
 
+  /**
+   * Set entity filter
+   */
+  const setFilter = (filter: EntityFilter) => {
+    setEntityFilter(filter);
+    // Clear results when filter changes
+    setResults(null);
+  };
+
+  /**
+   * Clear entity filter
+   */
+  const clearFilter = () => {
+    setEntityFilter({});
+    setResults(null);
+  };
+
   return {
     // State
     mode,
@@ -99,11 +122,14 @@ export function useSearch(options: UseSearchOptions = {}) {
     lastQuery,
     loading,
     error,
+    entityFilter,
 
     // Actions
     search,
     clear,
     changeMode,
+    setFilter,
+    clearFilter,
   };
 }
 
@@ -117,9 +143,15 @@ export function useSearch(options: UseSearchOptions = {}) {
 async function searchFts(
   dbClient: ReturnType<typeof getDbClient>,
   query: string,
-  maxResults: number
+  maxResults: number,
+  entityFilter: EntityFilter
 ): Promise<HybridResult[]> {
-  const ftsResults = await dbClient.searchFts(query, maxResults);
+  const ftsResults = await dbClient.searchFts(
+    query,
+    maxResults,
+    entityFilter.entityType,
+    entityFilter.entityValue
+  );
 
   // Convert FtsResult to HybridResult format
   return ftsResults.map((r: FtsResult) => ({
@@ -144,10 +176,16 @@ async function searchGraph(
   dbClient: ReturnType<typeof getDbClient>,
   query: string,
   maxResults: number,
-  maxHops: number
+  maxHops: number,
+  entityFilter: EntityFilter
 ): Promise<HybridResult[]> {
   // Start with FTS to find seed nodes
-  const ftsResults = await dbClient.searchFts(query, 3);
+  const ftsResults = await dbClient.searchFts(
+    query,
+    3,
+    entityFilter.entityType,
+    entityFilter.entityValue
+  );
 
   if (ftsResults.length === 0) {
     return [];
