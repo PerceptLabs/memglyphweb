@@ -154,11 +154,18 @@ export class DbClient {
     });
   }
 
-  async searchFts(query: string, limit = 20): Promise<FtsResult[]> {
+  async searchFts(
+    query: string,
+    limit = 20,
+    entityType?: string,
+    entityValue?: string
+  ): Promise<FtsResult[]> {
     return this.sendRequest<FtsResult[]>({
       type: 'FTS_SEARCH',
       query,
-      limit
+      limit,
+      entityType,
+      entityValue,
     });
   }
 

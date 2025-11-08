@@ -26,6 +26,28 @@ export const QUERIES = {
     LIMIT ?
   `,
 
+  // FTS Search with entity filtering (AND condition)
+  FTS_SEARCH_WITH_ENTITIES: `
+    SELECT
+      m.gid,
+      m.page_no,
+      m.title,
+      snippet(meta_fts, 3, '<mark>', '</mark>', '…', 18) AS snippet,
+      meta_fts.rank,
+      (1.0 / (ABS(meta_fts.rank) + 1.0)) AS score
+    FROM meta_fts
+    JOIN meta_index m ON m.rowid = meta_fts.rowid
+    WHERE meta_fts MATCH ?
+      AND m.gid IN (
+        SELECT DISTINCT gid
+        FROM entities
+        WHERE (entity_type = ? OR ? IS NULL)
+          AND (normalized_value = ? OR ? IS NULL)
+      )
+    ORDER BY meta_fts.rank
+    LIMIT ?
+  `,
+
   // List entity facets
   LIST_ENTITY_FACETS: `
     SELECT

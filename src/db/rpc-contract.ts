@@ -50,6 +50,8 @@ const FtsSearchRequest = z.object({
   type: z.literal('FTS_SEARCH'),
   query: z.string(),
   limit: z.number().int().positive().max(200).optional().default(20),
+  entityType: z.string().optional(),
+  entityValue: z.string().optional(),
 });
 
 const VectorSearchRequest = z.object({

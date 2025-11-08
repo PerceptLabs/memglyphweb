@@ -370,15 +370,37 @@ function closeCapsule(): RpcResponse<void> {
   return { ok: false, error: 'No database open' };
 }
 
-// FTS Search
-function searchFts(query: string, limit: number): RpcResponse<FtsResult[]> {
+// FTS Search (with optional entity filtering)
+function searchFts(
+  query: string,
+  limit: number,
+  entityType?: string,
+  entityValue?: string
+): RpcResponse<FtsResult[]> {
   if (!db) return { ok: false, error: 'No database open' };
 
   const results: FtsResult[] = [];
-  const stmt = db.prepare(QUERIES.FTS_SEARCH);
+
+  // Use entity-filtered query if filters are provided
+  const useEntityFilter = entityType || entityValue;
+  const sqlQuery = useEntityFilter ? QUERIES.FTS_SEARCH_WITH_ENTITIES : QUERIES.FTS_SEARCH;
+  const stmt = db.prepare(sqlQuery);
 
   try {
-    stmt.bind([query, limit]);
+    if (useEntityFilter) {
+      // Bind parameters for entity-filtered query
+      stmt.bind([
+        query,
+        entityType || null,
+        entityType || null,
+        entityValue || null,
+        entityValue || null,
+        limit
+      ]);
+    } else {
+      // Bind parameters for regular FTS query
+      stmt.bind([query, limit]);
+    }
 
     while (stmt.step()) {
       const row = stmt.get([]);
@@ -854,7 +876,7 @@ async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
         return closeCapsule();
 
       case 'FTS_SEARCH':
-        return searchFts(request.query, request.limit || 20);
+        return searchFts(request.query, request.limit || 20, request.entityType, request.entityValue);
 
       case 'VECTOR_SEARCH':
         return searchVector(request.queryVector, request.limit || 20);
