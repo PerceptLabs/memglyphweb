@@ -12,8 +12,10 @@ import type {
   VerificationResult,
   FusionWeights,
   GraphNode,
-  GraphEdge
-} from './types';
+  GraphEdge,
+  OpfsFileInfo,
+} from './rpc-contract';
+import { queueQuery, type QueryQueueStats, getQueryQueue } from './query-queue';
 
 export class DbClient {
   private worker: Worker | null = null;
@@ -21,6 +23,7 @@ export class DbClient {
   private pending = new Map<number, {
     resolve: (response: RpcResponse) => void;
     reject: (error: Error) => void;
+    timeout: NodeJS.Timeout;
   }>();
 
   constructor() {
@@ -65,28 +68,42 @@ export class DbClient {
     };
   }
 
-  private async sendRequest<T>(request: RpcRequest): Promise<T> {
+  private async sendRequest<T>(request: RpcRequest, timeout: number = 10000): Promise<T> {
     if (!this.worker) {
       throw new Error('Worker not initialized');
     }
 
     const id = this.nextId++;
 
-    return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, {
-        resolve: (response: RpcResponse) => {
-          if (response.ok) {
-            resolve(response.data as T);
-          } else {
-            reject(new Error(response.error));
-          }
-        },
-        reject
-      });
+    // Use query queue to serialize requests
+    return queueQuery(async () => {
+      return new Promise<T>((resolve, reject) => {
+        // Set up timeout
+        const timeoutHandle = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`Request ${request.type} timed out after ${timeout}ms`));
+        }, timeout);
 
-      const workerRequest: WorkerRequest = { id, request };
-      this.worker!.postMessage(workerRequest);
-    });
+        this.pending.set(id, {
+          resolve: (response: RpcResponse) => {
+            clearTimeout(timeoutHandle);
+            if (response.ok) {
+              resolve(response.data as T);
+            } else {
+              reject(new Error(response.error));
+            }
+          },
+          reject: (error: Error) => {
+            clearTimeout(timeoutHandle);
+            reject(error);
+          },
+          timeout: timeoutHandle,
+        });
+
+        const workerRequest: WorkerRequest = { id, request };
+        this.worker!.postMessage(workerRequest);
+      });
+    }, timeout);
   }
 
   // API Methods
@@ -98,9 +115,36 @@ export class DbClient {
     });
   }
 
+  async openFromOpfs(path: string): Promise<CapsuleInfo> {
+    return this.sendRequest<CapsuleInfo>({
+      type: 'OPEN_FROM_OPFS',
+      path
+    });
+  }
+
   async openDemo(): Promise<CapsuleInfo> {
     return this.sendRequest<CapsuleInfo>({
       type: 'OPEN_DEMO'
+    });
+  }
+
+  async saveToOpfs(path: string): Promise<void> {
+    return this.sendRequest<void>({
+      type: 'SAVE_TO_OPFS',
+      path
+    });
+  }
+
+  async removeFromOpfs(path: string): Promise<void> {
+    return this.sendRequest<void>({
+      type: 'REMOVE_FROM_OPFS',
+      path
+    });
+  }
+
+  async listOpfsFiles(): Promise<OpfsFileInfo[]> {
+    return this.sendRequest<OpfsFileInfo[]>({
+      type: 'LIST_OPFS_FILES'
     });
   }
 
@@ -182,10 +226,23 @@ export class DbClient {
     });
   }
 
+  getQueueStats(): QueryQueueStats {
+    return getQueryQueue().getStats();
+  }
+
+  isQueueBusy(): boolean {
+    return getQueryQueue().isBusy();
+  }
+
   terminate() {
     if (this.worker) {
       this.worker.terminate();
       this.worker = null;
+    }
+    // Clear all pending with timeout cleanup
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error('Worker terminated'));
     }
     this.pending.clear();
   }
