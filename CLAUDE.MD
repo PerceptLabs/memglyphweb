@@ -1,189 +1,458 @@
-Role: You are a senior full-stack engineer implementing a production-grade PWA that opens and queries a Glyphcapsule (*.mgx.sqlite) entirely client-side. Goal: Deliver an offline-capable app that (1) loads a Glyphcapsule, (2) searches via FTS5, (3) explores entities & graph edges, (4) verifies checkpoints/signatures, (5) optionally hands top-K snippets to a tiny LLM for reasoning, and (6) runs with zero backend.
+# GlyphCapsule PWA - Implementation Guide
 
-1) Context the model must internalize
-A Glyphcapsule is a single SQLite database using SQLAR to store the canonical corpus (e.g., glyphs/page_0001.mgx.png, ledger, etc.) plus rebuildable accelerators for search/graph. Key rebuildable tables include: meta_index, meta_fts (FTS5), leann_meta (seeds), leann_vec (cached vectors), entities, node_index, edges, ledger_blocks, checkpoints, keys.
-Design principle: everything besides sqlar is rebuildable from the archive; treat sqlar as the canonical source of truth.
-Use cases: bulk local queries, graph hops, provenance verification, and optional reasoning over retrieved snippets. (Hybrid retrieval is a first-class concept.)
-2) Non-negotiable tech choices
-Runtime: Browser-only, no Node server.
-Database: Official sqlite-wasm build with OPFS VFS (persistence) and FTS5 + JSON1 enabled.
-Workers: One dedicated DB Web Worker exposing a typed RPC (postMessage). Optional LLM Worker for in-browser reasoning.
-Storage: OPFS for the capsule (so large files persist across sessions).
-UI: Preact or Solid (lean), with a simple component kit and keyboard navigation.
-Build: Vite (fast dev + PWA plugin), TypeScript strict mode, ESLint.
-3) Functional requirements (must have)
-Open capsule: File Picker → copy to OPFS → open with sqlite-wasm VFS. Show file name, size, integrity state.
+**Role**: Senior full-stack engineer implementing a production-grade PWA that opens and queries a Glyphcapsule (*.mgx.sqlite) entirely client-side.
 
-Browse corpus:
+**Goal**: Deliver an offline-capable app that (1) loads a Glyphcapsule, (2) searches via FTS5, (3) explores entities & graph edges, (4) verifies checkpoints/signatures, (5) optionally hands top-K snippets to a tiny LLM for reasoning, and (6) runs with zero backend.
 
-List pages (from meta_index) with lazy, virtualized pagination.
-Render glyph images: read bytes from sqlar where name LIKE 'glyphs/%', convert to Blob, <img>.
-Full-text search:
+---
 
-Text input → query meta_fts with BM25 ranking. Show highlighted snippet(), gid, and page number.
-Result click scrolls to the page and highlights the region if present.
-Entities & filters:
+## 🎯 Current Status (as of Sprint 2)
 
-Facet by entities.entity_type and normalized_value.
-Combine with FTS query (AND filter) and keep it fast.
-Graph explorer:
+### ✅ Completed
 
-Visualize node_index + edges (predicates like cites) in a force graph.
-Clicking a node navigates to that page/entity.
-Provenance:
+**Sprint 1: Core Infrastructure**
+- ✅ OPFS persistence for SQLite databases
+- ✅ Type-safe RPC contract with Zod validation
+- ✅ Query queue with timeout protection
+- ✅ File picker for opening capsules
+- ✅ Basic feature module structure
 
-Show checkpoint timeline (checkpoints) and signer info (keys).
-Provide a “Verify current page” action: compute SHA anchor for selected page payload and compare to ledger/anchors where available.
-No-LLM mode (default):
+**Sprint 2: Search & Browsing**
+- ✅ FTS search with BM25 ranking and `snippet()` highlighting
+- ✅ Entity filtering (AND-based) integrated with FTS
+- ✅ Virtualized page browser with pagination
+- ✅ Asset blob lifecycle management for images/PDFs
+- ✅ Comprehensive test coverage (36 tests passing)
 
-Ranking = fusion of FTS rank + entity hits + optional neighbor hints (if leann_neighbors or equivalent table exists).
-Small-LLM mode (optional, toggle):
+### 🚧 In Progress / Planned
 
-Take top-K snippets (K=3–5) → send to a tiny local LLM (WebGPU with WebLLM/Transformers.js or localhost llama.cpp) strictly for reasoning/synthesis; retrieval always stays in SQL.
-Enforce “cite GIDs” in the output; refuse to answer outside provided snippets.
-4) Non-functional requirements
-Offline-first: full PWA install, cache app shell; capsule persists in OPFS.
-Performance: DB operations in a Worker; virtualized lists; debounced search; stream rows where possible.
-Security: no dynamic .load_extension; WASM modules are precompiled; guard against huge result sets; file-type sniffing on open.
-DX: clean module boundaries; typed RPC; unit tests for query builder and verifiers.
-5) Architecture & file layout
-/app
-  /public
-    manifest.webmanifest
-    icons/
-  /src
-    /db
-      sqlite.worker.ts         # sqlite-wasm init; RPC; OPFS helpers
-      ops.ts                   # high-level ops (openCapsule, searchFts, getPageBlob, listEntities, graphHops)
-      queries.ts               # all SQL strings + row mappers
-    /features
-      /open
-        OpenButton.tsx
-        CapsulePicker.tsx
-      /search
-        SearchBar.tsx
-        ResultsList.tsx
-      /page
-        PagePreview.tsx        # blob URL image view
-        PageSidebar.tsx        # entities, meta
-      /graph
-        GraphView.tsx          # force-graph or cytoscape
-      /provenance
-        VerifyPanel.tsx
-        CheckpointTimeline.tsx
-      /reason
-        ReasonToggle.tsx
-        ReasonWorker.ts        # optional tiny LLM (WebGPU) path
-    /state
-      store.ts                 # Zustand/Signal store
-      selectors.ts
-    /ui
-      Button.tsx, Panel.tsx, ...
-    app.tsx
-    main.tsx
-  vite.config.ts
-  package.json
-  README.md
-6) Worker RPC contract (typed)
-// db/ops.ts types
+**Sprint 3: UI Integration** (Next)
+- Wire entity facets to search filters
+- Main layout with search, results, and page preview
+- Click-to-navigate from search results to pages
+- Integrated metadata display
+
+**Sprint 4: Graph Visualization**
+- Graph data hooks for traversal
+- Force-directed graph visualization
+- Bidirectional navigation (in/out edges)
+- Predicate filtering
+
+**Sprint 5: Provenance & Verification**
+- Checkpoint timeline viewer
+- Page verification (SHA anchors vs ledger)
+- Ledger block browser
+- Signature validation
+
+**Sprint 6: Optional LLM Reasoning**
+- WebLLM/Wllama integration
+- Constrained prompting with GID citations
+- Top-K snippet synthesis
+- Hallucination guards
+
+---
+
+## 📋 Glyphcapsule Context
+
+A **Glyphcapsule** is a single SQLite database using SQLAR to store the canonical corpus (e.g., `glyphs/page_0001.mgx.png`, ledger, etc.) plus rebuildable accelerators for search/graph.
+
+**Key Tables**:
+- `sqlar` - Canonical archive (source of truth)
+- `meta_index` - Page metadata
+- `meta_fts` (FTS5) - Full-text search index with BM25
+- `entities` - Extracted entities with types and normalized values
+- `node_index` - Graph nodes
+- `edges` - Graph edges with predicates
+- `ledger_blocks` - Provenance ledger
+- `checkpoints` - Merkle roots and epochs
+- `keys` - Signer information
+
+**Design Principle**: Everything besides `sqlar` is rebuildable; treat `sqlar` as canonical.
+
+---
+
+## 🏗️ Architecture
+
+### Tech Stack
+- **Runtime**: Browser-only (no Node server)
+- **Database**: sqlite-wasm with OPFS VFS + FTS5 + JSON1
+- **Workers**: Dedicated DB worker (typed RPC), optional LLM worker
+- **Storage**: OPFS for persistence
+- **UI**: Preact with modular feature components
+- **Build**: Vite + TypeScript strict + PWA plugin
+
+### Current File Structure
+
+```
+/src
+  /db
+    sqlite.worker.ts       # SQLite-WASM init, RPC handler, OPFS
+    client.ts              # Main thread DB client
+    rpc-contract.ts        # Zod-validated RPC schemas
+    queries.ts             # SQL query definitions
+    query-queue.ts         # Serialized query execution
+    opfs.ts                # OPFS file operations
+    types.ts               # Database type definitions
+
+  /features
+    /open
+      FilePickerButton.tsx # Open capsule from file picker
+      useOpfs.ts           # OPFS state management
+
+    /search
+      SearchPanel.tsx      # Search UI component
+      useSearch.ts         # Search hook (FTS, hybrid, graph modes)
+      __tests__/           # Search tests
+
+    /entities
+      EntityPanel.tsx      # Entity facet UI
+      useEntities.ts       # Entity browsing hook
+      __tests__/           # Entity tests
+
+    /page
+      PageBrowser.tsx      # Virtualized page list
+      usePageBrowser.ts    # Page browsing hook
+      __tests__/           # Page browser tests
+
+    /assets
+      assetProtocol.ts     # Asset:// URL handler with blob lifecycle
+      __tests__/           # Asset loading tests
+
+    /graph               # [Sprint 4]
+    /provenance          # [Sprint 5]
+    /llm                 # [Sprint 6]
+    /router              # Navigation state
+    /layouts             # Layout components
+    /charts              # Data visualization
+
+  /gcui/v1
+    types.ts             # GCUI protocol types
+    detector.ts          # Format detection
+
+  /test
+    renderHook.tsx       # Test utilities
+
+  app.tsx
+  main.tsx
+```
+
+---
+
+## 🔌 Worker RPC Contract
+
+```typescript
+// Type-safe RPC operations (see src/db/rpc-contract.ts)
 export type RpcRequest =
-  | { t: 'OPEN_FROM_FILE'; fileHandle: File }
-  | { t: 'OPEN_FROM_OPFS'; path: string }
-  | { t: 'FTS_SEARCH'; query: string; limit?: number }
-  | { t: 'LIST_ENTITIES'; type?: string; norm?: string; limit?: number }
-  | { t: 'GRAPH_HOPS'; seedGid: string; pred?: string; dir?: 'out'|'in'; limit?: number }
-  | { t: 'GET_PAGE_BLOB'; name: string } // e.g., 'glyphs/page_0001.mgx.png'
-  | { t: 'VERIFY_PAGE'; gid: string };
+  | { type: 'OPEN_FROM_FILE'; file: File }
+  | { type: 'OPEN_FROM_OPFS'; path: string }
+  | { type: 'FTS_SEARCH'; query: string; limit?: number; entityType?: string; entityValue?: string }
+  | { type: 'HYBRID_SEARCH'; query: string; limit?: number; weights?: FusionWeights }
+  | { type: 'LIST_ENTITIES'; entityType?: string; limit?: number }
+  | { type: 'GRAPH_HOPS'; seedGid: string; predicate?: string; maxHops?: number; limit?: number }
+  | { type: 'GET_PAGE_LIST'; limit?: number; offset?: number }
+  | { type: 'GET_PAGE_BLOB'; name: string }
+  | { type: 'VERIFY_PAGE'; gid: string }
+  | { type: 'QUERY'; sql: string; params?: any[] };
 
-export type RpcResponse =
-  | { ok: true; data: any }
+export type RpcResponse<T = unknown> =
+  | { ok: true; data: T }
   | { ok: false; error: string };
-7) SQLite-WASM initialization (Worker)
-Load official sqlite3.wasm + OPFS VFS.
-If opening from File Picker, copy the bytes into OPFS as /capsules/<slug>.mgx.sqlite and then open with the OPFS VFS.
-Expose a single db per session; serialize queries.
-8) Core SQL (the agent must implement)
-List archived files (SQLAR):
+```
 
-SELECT name, sz, mtime FROM sqlar ORDER BY name;
-FTS search (BM25):
+All requests are validated with Zod schemas before execution.
 
+---
+
+## 🔍 Core SQL Queries
+
+### FTS Search with Entity Filtering
+```sql
 SELECT
-  gid,
-  snippet(meta_fts, 0, '<b>','</b>','…', 18) AS snip,
-  rank
+  m.gid,
+  m.page_no,
+  m.title,
+  snippet(meta_fts, 3, '<mark>', '</mark>', '…', 18) AS snippet,
+  meta_fts.rank,
+  (1.0 / (ABS(meta_fts.rank) + 1.0)) AS score
 FROM meta_fts
-WHERE meta_fts MATCH $q
-ORDER BY rank
-LIMIT $limit;
-Entities (facet):
+JOIN meta_index m ON m.rowid = meta_fts.rowid
+WHERE meta_fts MATCH ?
+  AND m.gid IN (
+    SELECT DISTINCT gid
+    FROM entities
+    WHERE (entity_type = ? OR ? IS NULL)
+      AND (normalized_value = ? OR ? IS NULL)
+  )
+ORDER BY meta_fts.rank
+LIMIT ?
+```
 
-SELECT entity_type, normalized_value, COUNT(*) AS c
+### Entity Facets
+```sql
+SELECT
+  entity_type,
+  normalized_value,
+  COUNT(DISTINCT gid) AS count
 FROM entities
 GROUP BY entity_type, normalized_value
-ORDER BY c DESC
-LIMIT 200;
-Graph hops (outbound cites):
+ORDER BY count DESC
+LIMIT ?
+```
 
-SELECT n2.gid, ed.pred, ed.weight
-FROM node_index n1
-JOIN edges ed ON ed.fromNode = n1.node_id
-JOIN node_index n2 ON n2.node_id = ed.toNode
-WHERE n1.gid = $seed AND ($pred IS NULL OR ed.pred = $pred)
-ORDER BY ed.weight DESC
-LIMIT $limit;
-Get a page image blob:
+### Graph Hops (Outbound)
+```sql
+WITH RECURSIVE graph_traversal(gid, depth) AS (
+  SELECT ?, 0
+  UNION ALL
+  SELECT n2.gid, gt.depth + 1
+  FROM graph_traversal gt
+  JOIN node_index n1 ON n1.gid = gt.gid
+  JOIN edges e ON e.fromNode = n1.node_id
+  JOIN node_index n2 ON n2.node_id = e.toNode
+  WHERE gt.depth < ?
+    AND (? IS NULL OR e.pred = ?)
+)
+SELECT DISTINCT
+  n.gid,
+  n.page_no,
+  n.title,
+  gt.depth AS distance
+FROM graph_traversal gt
+JOIN node_index n ON n.gid = gt.gid
+ORDER BY gt.depth, n.page_no
+LIMIT ?
+```
 
-SELECT data FROM sqlar WHERE name = $name LIMIT 1;
-Checkpoint list & verify helpers:
+### Page List
+```sql
+SELECT gid, doc_id, page_no, title, tags, updated_ts
+FROM meta_index
+ORDER BY page_no
+LIMIT ? OFFSET ?
+```
 
-SELECT epoch, merkle_root FROM checkpoints ORDER BY epoch DESC;
-SELECT * FROM ledger_blocks ORDER BY ts DESC LIMIT 100;
-Tables present by design: sqlar, meta_index, meta_fts, leann_meta, leann_vec, entities, node_index, edges, ledger_blocks, checkpoints, keys.
+### Asset Loading
+```sql
+SELECT data FROM sqlar WHERE name = ? LIMIT 1
+```
 
-9) Ranking (no-LLM mode)
-Implement a small fusion ranking on the UI side:
+---
 
-score = 0.5 * normalize(bm25)
-      + 0.3 * normalize(entity_hit_score)
-      + 0.2 * normalize(neighbor_hint_score)  // if available
-Return top-N with their GIDs and snippets.
+## 📊 Ranking & Fusion
 
-10) Optional small-LLM reasoning
-In-browser: WebGPU via WebLLM/Transformers.js OR localhost llama.cpp (Gemma 3 1B Q4_K_M) behind a minimal HTTP endpoint.
+### Current Implementation (Sprint 2)
+- **FTS Mode**: Pure BM25 ranking from `meta_fts.rank`
+- **Hybrid Mode**: Fusion of FTS + entity + graph scores
+- **Graph Mode**: Distance-based scoring (1.0 / (distance + 1))
 
-Strict prompt:
+### Fusion Weights (configurable)
+```typescript
+{
+  fts: 0.5,      // BM25 text relevance
+  vector: 0.0,   // [Future] Embedding similarity
+  entity: 0.3,   // Entity match score
+  graph: 0.2     // Graph proximity score
+}
+```
 
-System: “You are a constrained assistant. Only reason over the provided passages. Always cite gid values you used. If information is not in the snippets, say ‘insufficient evidence’.”
-User content: JSON with { question, snippets: [{gid, text}], instructions }.
-The agent must implement:
+---
 
-a toggle in UI,
-a 1500-token cap,
-and a guard that blocks answering if snippets.length === 0.
-11) UX outline
-Top bar: Open Capsule, Search, Reasoning Toggle, Verify
-Left: Filters (entity facets, predicates)
-Center: Results/Page Preview/Graph tabs
-Right: Provenance (checkpoints, signers), Details (entities on page)
-12) PWA & persistence
-Add manifest.webmanifest, icons, and Service Worker (workbox) to cache app shell.
-Store the capsule file in OPFS; reuse on next launch.
-Display storage usage and “Remove capsule” control.
-13) Testing & acceptance
-Unit tests for queries.ts mappers and graph hop helpers.
-Integration: open a known sample capsule; run FTS query; verify at least one graph hop; render a page image; list checkpoints.
-Lighthouse PWA score ≥ 90, TTI < 2.5s with empty capsule.
-Works in Chrome/Edge (WebAssembly + OPFS required).
-14) Deliverables
-Complete codebase per layout above.
-README.md with: quick start, browser support, how to load a capsule, how to verify, how to enable optional LLM.
-Demo data loader (button to open a local .mgx.sqlite).
-Minimal CSS with accessible defaults; responsive layout.
-15) Guardrails
-Do not introduce a backend server.
-Do not use dynamic SQLite extensions; everything must be compiled into the WASM build.
-Keep bundle size reasonable; lazy-load graph and reasoning modules.
-Build it. If something is underspecified, choose the simplest, most robust approach that satisfies offline use, OPFS persistence, and fast FTS + graph queries against the capsule.
+## 🧪 Testing Strategy
 
-i will explain what a glyphcapsule is after we make a plan to implement this, you can suggest adjustments
+**Current Coverage**: 36 tests across 5 test suites
+- GCUI detector: 7 tests
+- Asset protocol: 8 tests
+- Search hooks: 8 tests
+- Page browser: 5 tests
+- Entity hooks: 8 tests
+
+**Testing Approach**:
+- Unit tests for hooks and utilities
+- Mocked DB client for isolated testing
+- Integration tests for full workflows (planned)
+- Lighthouse PWA score target: ≥90
+
+---
+
+## 🚀 Sprint Roadmap
+
+### Sprint 3: UI Integration (Immediate Next)
+**Goal**: Make existing features usable through cohesive UI
+
+1. Main layout component
+   - Top bar: capsule info, search, toggles
+   - Left sidebar: entity facet filters
+   - Center panel: results/preview tabs
+   - Right sidebar: page metadata
+
+2. Wire entity facets to search
+   - Connect `EntityPanel` to `useSearch.setFilter()`
+   - Show active filters with clear buttons
+   - Auto-refresh results on filter change
+
+3. Integrated search UI
+   - Combine search bar + entity filters
+   - Display results with `<mark>` snippets
+   - Click result → load page preview
+
+4. Page preview component
+   - Use `useAsset()` to load images
+   - Display page metadata
+   - Navigation controls (prev/next)
+
+**Acceptance**: User can open capsule → search with filters → view pages
+
+---
+
+### Sprint 4: Graph Visualization
+**Goal**: Interactive graph exploration
+
+1. Graph data hooks
+   - `useGraph()` for traversal state
+   - Support in/out edge filtering
+   - Predicate type filters
+
+2. Graph visualization
+   - Force-directed layout (D3/Cytoscape)
+   - Node click → navigate to page
+   - Highlight paths and clusters
+
+3. Graph search integration
+   - Visual representation of graph results
+   - Show connection paths
+
+**Acceptance**: User can explore graph connections between pages
+
+---
+
+### Sprint 5: Provenance & Verification
+**Goal**: Trust and transparency
+
+1. Checkpoint timeline
+   - List from `checkpoints` table
+   - Show merkle roots and epochs
+   - Display signer info from `keys`
+
+2. Page verification
+   - "Verify Page" action in UI
+   - Compute SHA anchor from payload
+   - Compare against `ledger_blocks`
+   - Display verification status
+
+3. Provenance panel
+   - Ledger block browser
+   - Checkpoint history
+   - Signature validation UI
+
+**Acceptance**: User can verify page integrity and view provenance
+
+---
+
+### Sprint 6: Optional LLM Reasoning
+**Goal**: In-browser AI synthesis
+
+1. LLM worker integration
+   - Configure WebLLM or Wllama
+   - Load Gemma 3 1B or similar
+   - Implement constrained prompting
+
+2. Reasoning UI
+   - Toggle for LLM mode in search
+   - Take top-K snippets → LLM
+   - Display answer with GID citations
+   - Guard: "insufficient evidence" if no snippets
+
+3. Performance optimization
+   - Model caching
+   - Token limits (1500 cap)
+   - Lazy loading
+
+**Acceptance**: User can ask questions and get cited answers from capsule
+
+---
+
+## 🛡️ Non-Functional Requirements
+
+### Offline-First
+- ✅ Full PWA with service worker
+- ✅ OPFS persistence
+- ✅ Cache app shell
+- ⏳ Display storage usage controls
+
+### Performance
+- ✅ DB operations in dedicated worker
+- ✅ Virtualized lists for large datasets
+- ✅ Blob caching with lifecycle management
+- ⏳ Debounced search input
+- ⏳ Stream large result sets
+
+### Security
+- ✅ No dynamic `.load_extension`
+- ✅ Precompiled WASM modules
+- ✅ Result set limits (200 max)
+- ⏳ File type sniffing on open
+- ⏳ Content Security Policy headers
+
+### Developer Experience
+- ✅ Clean module boundaries
+- ✅ Type-safe RPC with Zod validation
+- ✅ Comprehensive unit tests
+- ✅ TypeScript strict mode
+- ⏳ Integration test suite
+
+---
+
+## 📦 Build & Deploy
+
+### Commands
+```bash
+npm run dev          # Development server
+npm run build        # Production build
+npm run preview      # Preview production build
+npm test             # Run tests
+npm run test:ui      # Visual test runner
+npm run lint         # ESLint check
+```
+
+### Bundle Size Target
+- Current: ~547 KB total (gzip)
+- Target: < 1 MB including WASM
+
+### Browser Support
+- Chrome/Edge 102+ (OPFS + WASM required)
+- Firefox (experimental OPFS support)
+- Safari (limited OPFS support)
+
+---
+
+## 🚫 Guardrails
+
+1. **No Backend**: Everything runs client-side
+2. **No Dynamic Extensions**: All SQLite features compiled into WASM
+3. **Reasonable Bundle Size**: Lazy-load graph and LLM modules
+4. **SQLAR is Canonical**: Never modify `sqlar` table
+5. **Type Safety**: All RPC validated with Zod
+6. **Test Coverage**: Maintain >80% for critical paths
+
+---
+
+## 📚 Key References
+
+- **SQLite WASM**: https://sqlite.org/wasm/
+- **OPFS**: https://developer.mozilla.org/en-US/docs/Web/API/File_System_API
+- **FTS5**: https://sqlite.org/fts5.html
+- **Preact**: https://preactjs.com/
+- **Vite PWA**: https://vite-pwa-org.netlify.app/
+
+---
+
+## 🤝 Contributing
+
+When implementing new features:
+1. Start with the data layer (RPC + SQL queries)
+2. Add hook for state management
+3. Build UI component
+4. Write tests
+5. Update this document
+
+Keep module boundaries clean. Each feature should be independently testable.
