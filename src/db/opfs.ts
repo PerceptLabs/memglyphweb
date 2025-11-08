@@ -51,7 +51,7 @@ async function getOpfsRoot(): Promise<FileSystemDirectoryHandle> {
 /**
  * Ensure the capsules directory exists
  */
-async function ensureCapsulesDirre(): Promise<FileSystemDirectoryHandle> {
+async function ensureCapsulesDir(): Promise<FileSystemDirectoryHandle> {
   const root = await getOpfsRoot();
   return await root.getDirectoryHandle('capsules', { create: true });
 }
@@ -82,7 +82,7 @@ export async function copyFileToOpfs(
     throw new Error('OPFS not supported - cannot persist file');
   }
 
-  const capsuleDir = await ensureCapsulesDirre();
+  const capsuleDir = await ensureCapsulesDir();
   const filePath = path || generateOpfsPath(file.name);
 
   // Get or create the file
@@ -120,7 +120,7 @@ export async function readFileFromOpfs(path: string): Promise<Uint8Array> {
     throw new Error('OPFS not supported');
   }
 
-  const capsuleDir = await ensureCapsulesDirre();
+  const capsuleDir = await ensureCapsulesDir();
   const fileHandle = await capsuleDir.getFileHandle(path);
   const file = await fileHandle.getFile();
   const arrayBuffer = await file.arrayBuffer();
@@ -138,7 +138,7 @@ export async function removeFileFromOpfs(path: string): Promise<void> {
     throw new Error('OPFS not supported');
   }
 
-  const capsuleDir = await ensureCapsulesDirre();
+  const capsuleDir = await ensureCapsulesDir();
   await capsuleDir.removeEntry(path);
 
   console.log(`[OPFS] Removed file: ${path}`);
@@ -153,7 +153,7 @@ export async function listOpfsFiles(): Promise<OpfsFileInfo[]> {
   }
 
   try {
-    const capsuleDir = await ensureCapsulesDirre();
+    const capsuleDir = await ensureCapsulesDir();
     const files: OpfsFileInfo[] = [];
 
     // Iterate over directory entries
@@ -184,7 +184,7 @@ export async function fileExistsInOpfs(path: string): Promise<boolean> {
   }
 
   try {
-    const capsuleDir = await ensureCapsulesDirre();
+    const capsuleDir = await ensureCapsulesDir();
     await capsuleDir.getFileHandle(path);
     return true;
   } catch {

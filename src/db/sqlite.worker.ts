@@ -12,10 +12,22 @@ import type {
   EntityFacet,
   PageInfo,
   Checkpoint,
-  VerificationResult
-} from './types';
+  VerificationResult,
+  OpfsFileInfo,
+} from './rpc-contract';
+import {
+  validateWorkerRequest,
+  successResponse,
+  errorResponse,
+} from './rpc-contract';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
 import { QUERIES, cosineSimilarity, unpackVector, parseJsonSafe, sha256, DEFAULT_FUSION_WEIGHTS } from './queries';
+import {
+  readFileFromOpfs,
+  removeFileFromOpfs,
+  listOpfsFiles,
+  isOpfsSupported,
+} from './opfs';
 const REQUIRED_TABLES = [
   'sqlar',
   'meta_index',
@@ -66,7 +78,7 @@ function validateSchema(): { valid: boolean; missing: string[] } {
 }
 
 // Get capsule metadata
-function getCapsuleInfo(fileName: string, fileSize: number): CapsuleInfo {
+function getCapsuleInfo(fileName: string, fileSize: number, opfsPath?: string): CapsuleInfo {
   if (!db) throw new Error('No database open');
 
   // Get doc_id from first page
@@ -151,7 +163,8 @@ function getCapsuleInfo(fileName: string, fileSize: number): CapsuleInfo {
     edgeCount,
     hasVectors,
     vectorModel,
-    vectorDim
+    vectorDim,
+    opfsPath,
   };
 }
 
@@ -222,6 +235,127 @@ async function openDemo(): Promise<RpcResponse<CapsuleInfo>> {
   } catch (error) {
     console.error('[Worker] Failed to open demo capsule:', error);
     return { ok: false, error: String(error) };
+  }
+}
+
+// Open capsule from OPFS
+async function openFromOpfs(path: string): Promise<RpcResponse<CapsuleInfo>> {
+  try {
+    if (!isOpfsSupported()) {
+      throw new Error('OPFS not supported in this browser');
+    }
+
+    // Read file from OPFS
+    const bytes = await readFileFromOpfs(path);
+
+    // Close existing database
+    if (db) {
+      db.close();
+      db = null;
+    }
+
+    // Open in-memory database
+    db = new sqlite3.oo1.DB(':memory:');
+
+    // Deserialize the database
+    const rc = sqlite3.capi.sqlite3_deserialize(
+      db.pointer,
+      'main',
+      bytes,
+      bytes.length,
+      bytes.length,
+      sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+      sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+    );
+
+    if (rc !== sqlite3.capi.SQLITE_OK) {
+      throw new Error(`Failed to deserialize database: ${rc}`);
+    }
+
+    // Validate schema
+    const validation = validateSchema();
+    if (!validation.valid) {
+      throw new Error(`Invalid schema. Missing tables: ${validation.missing.join(', ')}`);
+    }
+
+    // Get metadata (include OPFS path)
+    const info = getCapsuleInfo(path, bytes.length, path);
+    currentCapsuleInfo = info;
+
+    console.log('[Worker] Capsule opened from OPFS:', info);
+
+    return successResponse(info);
+  } catch (error) {
+    console.error('[Worker] Failed to open capsule from OPFS:', error);
+    return errorResponse(error as Error);
+  }
+}
+
+// Save current database to OPFS
+async function saveToOpfs(path: string): Promise<RpcResponse<void>> {
+  try {
+    if (!db) {
+      throw new Error('No database open');
+    }
+
+    if (!isOpfsSupported()) {
+      throw new Error('OPFS not supported in this browser');
+    }
+
+    // Serialize the database
+    const serialized = sqlite3.capi.sqlite3_serialize(
+      db.pointer,
+      'main',
+      0,
+      0
+    );
+
+    if (!serialized) {
+      throw new Error('Failed to serialize database');
+    }
+
+    // Note: In a worker context, we can't directly write to OPFS from here
+    // The main thread needs to handle the actual OPFS write
+    // So we'll send the data back via a different mechanism
+    throw new Error('SAVE_TO_OPFS should be handled by main thread, not worker');
+
+  } catch (error) {
+    console.error('[Worker] Failed to save to OPFS:', error);
+    return errorResponse(error as Error);
+  }
+}
+
+// Remove file from OPFS
+async function removeFromOpfsHandler(path: string): Promise<RpcResponse<void>> {
+  try {
+    if (!isOpfsSupported()) {
+      throw new Error('OPFS not supported in this browser');
+    }
+
+    await removeFileFromOpfs(path);
+
+    console.log(`[Worker] Removed file from OPFS: ${path}`);
+
+    return successResponse(undefined);
+  } catch (error) {
+    console.error('[Worker] Failed to remove file from OPFS:', error);
+    return errorResponse(error as Error);
+  }
+}
+
+// List files in OPFS
+async function listOpfsFilesHandler(): Promise<RpcResponse<OpfsFileInfo[]>> {
+  try {
+    if (!isOpfsSupported()) {
+      return successResponse([]);
+    }
+
+    const files = await listOpfsFiles();
+
+    return successResponse(files);
+  } catch (error) {
+    console.error('[Worker] Failed to list OPFS files:', error);
+    return errorResponse(error as Error);
   }
 }
 
@@ -701,8 +835,20 @@ async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
       case 'OPEN_FROM_FILE':
         return await openFromFile(request.file);
 
+      case 'OPEN_FROM_OPFS':
+        return await openFromOpfs(request.path);
+
       case 'OPEN_DEMO':
         return await openDemo();
+
+      case 'SAVE_TO_OPFS':
+        return await saveToOpfs(request.path);
+
+      case 'REMOVE_FROM_OPFS':
+        return await removeFromOpfsHandler(request.path);
+
+      case 'LIST_OPFS_FILES':
+        return await listOpfsFilesHandler();
 
       case 'CLOSE':
         return closeCapsule();
