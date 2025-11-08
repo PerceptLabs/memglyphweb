@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'preact/hooks';
 import { getDbClient } from './db/client';
-import type { CapsuleInfo } from './db/types';
+import type { CapsuleInfo } from './db/rpc-contract';
 
 // Feature modules
 import { useSearch, SearchPanel } from './features/search';
 import { useEntities, EntityPanel, EntityToggleButton } from './features/entities';
 import { useLlm, LlmToggle, ReasoningOutput } from './features/llm';
+import { FilePicker } from './features/open/FilePicker';
 
 // GCUI modules
 import { loadGcuiContext } from './gcui/v1/detector';
@@ -86,6 +87,44 @@ export function App() {
     }
   };
 
+  const handleFileSelected = async (file: File, opfsPath?: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const dbClient = getDbClient();
+      const info = await dbClient.openFromFile(file);
+      setCapsuleInfo(info);
+      console.log('Capsule opened:', info);
+    } catch (err) {
+      setError(String(err));
+      console.error('Failed to open file:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpfsFileSelected = async (path: string) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const dbClient = getDbClient();
+      const info = await dbClient.openFromOpfs(path);
+      setCapsuleInfo(info);
+      console.log('Capsule opened from OPFS:', info);
+    } catch (err) {
+      setError(String(err));
+      console.error('Failed to open from OPFS:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFilePickerError = (errorMsg: string) => {
+    setError(errorMsg);
+  };
+
   const handleSearch = async (query: string) => {
     if (!capsuleInfo) return;
 
@@ -116,30 +155,28 @@ export function App() {
       <main className="app-main">
         {!capsuleInfo ? (
           <div className="welcome">
-            <h2>Welcome!</h2>
-            <p>
-              This is an offline-capable PWA for exploring MemGlyph Glyphcapsules
-              with hybrid retrieval (FTS + Vector + Entity + Graph).
-            </p>
-            <p>
-              <strong>Demo capsule:</strong> memglyph-demo.mgx.sqlite
-              <br />
-              (8 pages, 25 entities, 11 edges, 384-dim vectors)
-            </p>
-
             {error && (
-              <div className="error">
+              <div className="error" style="max-width: 600px; margin: 1rem auto;">
                 <strong>Error:</strong> {error}
               </div>
             )}
 
-            <button
-              className="btn-primary"
-              onClick={handleOpenDemo}
-              disabled={loading}
-            >
-              {loading ? 'Opening...' : 'Open Demo Capsule'}
-            </button>
+            <FilePicker
+              onFileSelected={handleFileSelected}
+              onOpfsFileSelected={handleOpfsFileSelected}
+              onError={handleFilePickerError}
+            />
+
+            <div style="text-align: center; margin-top: 1.5rem;">
+              <p style="margin-bottom: 0.5rem; opacity: 0.7;">Or try the demo:</p>
+              <button
+                className="btn-secondary"
+                onClick={handleOpenDemo}
+                disabled={loading}
+              >
+                {loading ? 'Loading Demo...' : 'Load Demo Capsule'}
+              </button>
+            </div>
           </div>
         ) : gcuiContext && config.features.gcui.enabled ? (
           // GCUI Mode - Render as website/dashboard
