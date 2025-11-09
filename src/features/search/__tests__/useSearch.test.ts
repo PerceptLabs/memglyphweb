@@ -69,7 +69,7 @@ describe('useSearch', () => {
     const { result } = renderHook(() => useSearch({ defaultMode: 'fts' }));
 
     await act(async () => {
-      await result.current.search('test query');
+      await result.current.searchImmediate('test query');
     });
 
     expect(result.current.results).not.toBeNull();
@@ -81,7 +81,7 @@ describe('useSearch', () => {
     const { result } = renderHook(() => useSearch({ defaultMode: 'hybrid' }));
 
     await act(async () => {
-      await result.current.search('test query');
+      await result.current.searchImmediate('test query');
     });
 
     expect(result.current.results).not.toBeNull();
@@ -114,7 +114,7 @@ describe('useSearch', () => {
     const { result } = renderHook(() => useSearch());
 
     // Start the search (don't await yet)
-    const searchPromise = result.current.search('test');
+    const searchPromise = result.current.searchImmediate('test');
 
     // Check loading state immediately (should be true during search)
     // Note: This test relies on the search being async and not completing synchronously

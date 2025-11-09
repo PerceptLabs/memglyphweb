@@ -4,7 +4,7 @@
  * Encapsulates all LLM-related state and logic.
  */
 
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { getLlmClient, QWEN_MODELS } from '../../db/llm-client';
 import type { LlmModelInfo, ReasoningResponse, LlmProgress } from '../../db/llm-types';
 import type { HybridResult } from '../../db/types';
@@ -20,6 +20,41 @@ export function useLlm(options: UseLlmOptions = {}) {
   const [progress, setProgress] = useState<LlmProgress | null>(null);
   const [reasoning, setReasoning] = useState<ReasoningResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [elapsedTime, setElapsedTime] = useState<number>(0);
+  const [temperature, setTemperature] = useState<number>(0.7); // Default 0.7
+
+  const startTimeRef = useRef<number>(0);
+  const timerRef = useRef<number | null>(null);
+
+  /**
+   * Update elapsed time while loading
+   */
+  useEffect(() => {
+    if (loading && !progress) {
+      // Inference is happening (no download progress, but loading)
+      startTimeRef.current = Date.now();
+      setElapsedTime(0);
+
+      // Update every 100ms
+      timerRef.current = window.setInterval(() => {
+        const elapsed = (Date.now() - startTimeRef.current) / 1000;
+        setElapsedTime(elapsed);
+      }, 100);
+
+      return () => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+        }
+      };
+    } else {
+      // Not loading or has progress - clear timer
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      setElapsedTime(0);
+    }
+  }, [loading, progress]);
 
   /**
    * Load the LLM model
@@ -96,7 +131,7 @@ export function useLlm(options: UseLlmOptions = {}) {
         question: query,
         snippets,
         maxTokens,
-        temperature: 0.7,
+        temperature,
       });
 
       setReasoning(response);
@@ -125,11 +160,14 @@ export function useLlm(options: UseLlmOptions = {}) {
     progress,
     reasoning,
     error,
+    elapsedTime, // Elapsed time during inference (in seconds)
+    temperature, // LLM temperature setting (0.0 - 1.0)
 
     // Actions
     toggle,
     loadModel,
     reason,
     clearReasoning,
+    setTemperature, // Update temperature setting
   };
 }

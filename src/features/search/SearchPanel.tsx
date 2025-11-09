@@ -46,33 +46,67 @@ export interface SearchBarProps {
   onSearch: (query: string) => void;
   loading?: boolean;
   placeholder?: string;
+  searchHistory?: string[];
+  onClearHistory?: () => void;
 }
 
-export function SearchBar({ onSearch, loading, placeholder }: SearchBarProps) {
+export function SearchBar({ onSearch, loading, placeholder, searchHistory, onClearHistory }: SearchBarProps) {
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const formData = new FormData(e.currentTarget);
-        const query = formData.get('query') as string;
-        if (query?.trim()) {
-          onSearch(query.trim());
-        }
-      }}
-    >
-      <div className="search-bar">
-        <input
-          type="text"
-          name="query"
-          placeholder={placeholder || 'Search the capsule...'}
-          className="search-input"
-          disabled={loading}
-        />
-        <button type="submit" className="btn-search" disabled={loading}>
-          {loading ? 'Searching...' : 'Search'}
-        </button>
-      </div>
-    </form>
+    <>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const formData = new FormData(e.currentTarget);
+          const query = formData.get('query') as string;
+          if (query?.trim()) {
+            onSearch(query.trim());
+          }
+        }}
+      >
+        <div className="search-bar">
+          <input
+            type="text"
+            name="query"
+            placeholder={placeholder || 'Search the capsule...'}
+            className="search-input"
+            disabled={loading}
+          />
+          <button type="submit" className="btn-search" disabled={loading}>
+            {loading ? 'Searching...' : 'Search'}
+          </button>
+        </div>
+      </form>
+
+      {/* Search History */}
+      {searchHistory && searchHistory.length > 0 && (
+        <div className="search-history">
+          <div className="search-history-header">
+            <span className="search-history-label">Recent searches:</span>
+            {onClearHistory && (
+              <button
+                className="search-history-clear"
+                onClick={onClearHistory}
+                type="button"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="search-history-items">
+            {searchHistory.map((query, index) => (
+              <button
+                key={index}
+                className="search-history-item"
+                onClick={() => onSearch(query)}
+                type="button"
+              >
+                {query}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -128,6 +162,8 @@ export interface SearchPanelProps {
   showModeToggle?: boolean;
   placeholder?: string;
   searchHint?: string;
+  searchHistory?: string[];
+  onClearHistory?: () => void;
 }
 
 export function SearchPanel({
@@ -141,6 +177,8 @@ export function SearchPanel({
   showModeToggle = true,
   placeholder,
   searchHint,
+  searchHistory,
+  onClearHistory,
 }: SearchPanelProps) {
   return (
     <div className="search-section">
@@ -154,8 +192,27 @@ export function SearchPanel({
       {/* Search Hint */}
       {searchHint && <p className="search-hint">{searchHint}</p>}
 
+      {/* Keyboard Shortcuts Hint */}
+      <div className="keyboard-shortcuts-hint">
+        <span className="shortcut-item">
+          <kbd>/</kbd> Focus search
+        </span>
+        <span className="shortcut-item">
+          <kbd>Ctrl+L</kbd> Toggle LLM
+        </span>
+        <span className="shortcut-item">
+          <kbd>Esc</kbd> Clear focus
+        </span>
+      </div>
+
       {/* Search Bar */}
-      <SearchBar onSearch={onSearch} loading={loading} placeholder={placeholder} />
+      <SearchBar
+        onSearch={onSearch}
+        loading={loading}
+        placeholder={placeholder}
+        searchHistory={searchHistory}
+        onClearHistory={onClearHistory}
+      />
 
       {/* Search Results */}
       {results && results.length > 0 && (

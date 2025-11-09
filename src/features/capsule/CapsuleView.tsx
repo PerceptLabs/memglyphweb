@@ -11,6 +11,7 @@ import { useEntities } from '../entities';
 import { useGraph } from '../graph';
 import { useProvenance } from '../provenance';
 import { useLlm } from '../llm';
+import { useKeyboardShortcuts } from '../shortcuts';
 import { SearchPanel } from '../search/SearchPanel';
 import { EntityPanel } from '../entities/EntityPanel';
 import { PagePreviewPanel } from '../page';
@@ -37,6 +38,25 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
   const graph = useGraph({ maxHops: 2, limit: 50 });
   const provenance = useProvenance({ autoLoadCheckpoints: true });
   const llm = useLlm({ autoReason: false });
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onFocusSearch: () => {
+      // Focus the search input
+      const searchInput = document.querySelector<HTMLInputElement>('input[name="query"]');
+      searchInput?.focus();
+      searchInput?.select();
+    },
+    onToggleLlm: () => {
+      llm.toggle();
+    },
+    onEscape: () => {
+      // Clear focus from any input
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    },
+  });
 
   // Handle entity filter selection
   const handleEntityClick = (entityType: string, entityValue: string) => {
@@ -212,11 +232,37 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                 showModeToggle={true}
                 placeholder="Search the capsule..."
                 searchHint='Try: "vector search", "LEANN", "SQLite", or "hybrid retrieval"'
+                searchHistory={search.searchHistory}
+                onClearHistory={search.clearHistory}
               />
 
               {/* LLM Reasoning Output */}
               {llm.enabled && search.results && search.results.length > 0 && (
                 <div className="llm-section">
+                  {/* Temperature Control */}
+                  <div className="llm-temperature-control">
+                    <label htmlFor="temperature-slider" className="temperature-label">
+                      Creativity:
+                      <input
+                        id="temperature-slider"
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={llm.temperature}
+                        onChange={(e) => llm.setTemperature(parseFloat(e.currentTarget.value))}
+                        className="temperature-slider"
+                      />
+                      <span className="temperature-value">{llm.temperature.toFixed(1)}</span>
+                    </label>
+                    <small className="temperature-hint">
+                      {llm.temperature < 0.3 && '❄️ Very factual'}
+                      {llm.temperature >= 0.3 && llm.temperature < 0.6 && '📐 Mostly factual'}
+                      {llm.temperature >= 0.6 && llm.temperature < 0.8 && '⚖️ Balanced'}
+                      {llm.temperature >= 0.8 && '🎨 Creative'}
+                    </small>
+                  </div>
+
                   {llm.progress && (
                     <div className="llm-progress-bar">
                       <div className="llm-progress-info">
@@ -244,12 +290,26 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                     <div className="reasoning-loading">
                       <div className="spinner"></div>
                       <p>LLM is reasoning over search results...</p>
+                      {llm.elapsedTime > 0 && (
+                        <p className="inference-time">
+                          Elapsed: {llm.elapsedTime.toFixed(1)}s
+                          {llm.elapsedTime > 3 && ' • Typically takes 2-5s'}
+                        </p>
+                      )}
                     </div>
                   )}
 
                   {llm.error && (
                     <div className="llm-error-panel">
                       <strong>⚠️ LLM Error:</strong> {llm.error}
+                      <button
+                        className="btn-secondary btn-sm"
+                        onClick={handleAskLlm}
+                        disabled={llm.loading}
+                        style={{ marginLeft: '1rem' }}
+                      >
+                        {llm.loading ? 'Retrying...' : 'Try Again'}
+                      </button>
                     </div>
                   )}
                 </div>

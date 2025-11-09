@@ -4,6 +4,7 @@
  * Provides UI for LLM reasoning feature.
  */
 
+import { useState } from 'preact/hooks';
 import type { HybridResult } from '../../db/types';
 import type { UseLlmOptions } from './useLlm';
 import { useLlm } from './useLlm';
@@ -147,6 +148,8 @@ export interface ReasoningOutputProps {
 }
 
 export function ReasoningOutput({ reasoning, searchResults, loading }: ReasoningOutputProps) {
+  const [hoveredGid, setHoveredGid] = useState<string | null>(null);
+
   if (loading && !reasoning) {
     return (
       <div className="reasoning-loading">
@@ -175,8 +178,30 @@ export function ReasoningOutput({ reasoning, searchResults, loading }: Reasoning
           {reasoning.usedSnippets.map((gid) => {
             const result = searchResults?.find((r) => r.gid === gid);
             return (
-              <span key={gid} className="citation">
+              <span
+                key={gid}
+                className="citation"
+                onMouseEnter={() => setHoveredGid(gid)}
+                onMouseLeave={() => setHoveredGid(null)}
+                style={{ position: 'relative' }}
+              >
                 Page {result?.pageNo || '?'}
+
+                {/* Citation Preview Tooltip */}
+                {hoveredGid === gid && result && (
+                  <div className="citation-tooltip">
+                    <div className="citation-tooltip-title">{result.title}</div>
+                    {result.snippet && (
+                      <div
+                        className="citation-tooltip-snippet"
+                        dangerouslySetInnerHTML={{ __html: result.snippet }}
+                      />
+                    )}
+                    <div className="citation-tooltip-meta">
+                      Score: {result.scores.final.toFixed(3)} • GID: {gid.slice(0, 8)}...
+                    </div>
+                  </div>
+                )}
               </span>
             );
           })}

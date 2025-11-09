@@ -18,6 +18,81 @@ let modelInfo: LlmModelInfo = {
   loaded: false
 };
 
+// OPFS cache for model files
+const MODEL_CACHE_DIR = 'llm-models';
+
+async function getCachedModel(modelId: string): Promise<Uint8Array | null> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const cacheDir = await root.getDirectoryHandle(MODEL_CACHE_DIR, { create: true });
+    const fileHandle = await cacheDir.getFileHandle(modelId);
+    const file = await fileHandle.getFile();
+    const buffer = await file.arrayBuffer();
+    console.log(`[LLM Worker] Loaded ${modelId} from OPFS cache (${buffer.byteLength} bytes)`);
+    return new Uint8Array(buffer);
+  } catch (e) {
+    // File not in cache
+    return null;
+  }
+}
+
+async function cacheModel(modelId: string, data: Uint8Array): Promise<void> {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const cacheDir = await root.getDirectoryHandle(MODEL_CACHE_DIR, { create: true });
+    const fileHandle = await cacheDir.getFileHandle(modelId, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(data);
+    await writable.close();
+    console.log(`[LLM Worker] Cached ${modelId} to OPFS (${data.byteLength} bytes)`);
+  } catch (e) {
+    console.warn('[LLM Worker] Failed to cache model:', e);
+  }
+}
+
+async function downloadModel(url: string, progressCallback?: (progress: { loaded: number; total: number }) => void): Promise<Uint8Array> {
+  console.log('[LLM Worker] Downloading model from:', url);
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to download model: ${response.statusText}`);
+  }
+
+  const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+  const reader = response.body?.getReader();
+
+  if (!reader) {
+    throw new Error('No response body');
+  }
+
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) break;
+
+    chunks.push(value);
+    loaded += value.length;
+
+    if (progressCallback && contentLength > 0) {
+      progressCallback({ loaded, total: contentLength });
+    }
+  }
+
+  // Concatenate chunks
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return result;
+}
+
 // Initialize wllama
 async function initWllama() {
   if (wllama) return;
@@ -42,7 +117,7 @@ async function loadModel(modelUrl: string): Promise<LlmWorkerResponse> {
       return { ok: false, error: 'Failed to initialize wllama' };
     }
 
-    console.log('[LLM Worker] Loading model from:', modelUrl);
+    const modelId = 'qwen3-0.6b.gguf';
 
     // Send progress updates
     const progressCallback = ({ loaded, total }: { loaded: number; total: number }) => {
@@ -55,11 +130,37 @@ async function loadModel(modelUrl: string): Promise<LlmWorkerResponse> {
       self.postMessage({ type: 'PROGRESS', data: progressMsg });
     };
 
-    // Load model from URL
-    await wllama.loadModelFromUrl(modelUrl, {
+    let modelData: Uint8Array;
+
+    // Check OPFS cache first
+    const cached = await getCachedModel(modelId);
+
+    if (cached) {
+      console.log('[LLM Worker] Using cached model');
+      modelData = cached;
+
+      // Send a quick "loaded from cache" progress update
+      const progressMsg: LlmProgress = {
+        type: 'DOWNLOAD',
+        progress: 1.0,
+        message: 'Loaded from cache'
+      };
+      self.postMessage({ type: 'PROGRESS', data: progressMsg });
+    } else {
+      console.log('[LLM Worker] Model not cached, downloading...');
+
+      // Download model
+      modelData = await downloadModel(modelUrl, progressCallback);
+
+      // Cache for next time
+      await cacheModel(modelId, modelData);
+    }
+
+    // Load model into wllama
+    console.log('[LLM Worker] Loading model into wllama...');
+    await wllama.loadModel(modelData.buffer, {
       n_ctx: 2048,
-      n_batch: 512,
-      progressCallback
+      n_batch: 512
     });
 
     modelInfo = {

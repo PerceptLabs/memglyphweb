@@ -4,7 +4,7 @@
  * Encapsulates search state and logic for FTS, Hybrid, and Graph modes.
  */
 
-import { useState } from 'preact/hooks';
+import { useState, useEffect, useRef } from 'preact/hooks';
 import { getDbClient } from '../../db/client';
 import type { HybridResult, FtsResult } from '../../db/types';
 
@@ -14,6 +14,7 @@ export interface UseSearchOptions {
   defaultMode?: SearchMode;
   maxResults?: number;
   maxGraphHops?: number;
+  debounceMs?: number; // Debounce delay in milliseconds
 }
 
 export interface EntityFilter {
@@ -26,6 +27,7 @@ export function useSearch(options: UseSearchOptions = {}) {
     defaultMode = 'hybrid',
     maxResults = 10,
     maxGraphHops = 2,
+    debounceMs = 300, // Default 300ms debounce
   } = options;
 
   const [mode, setMode] = useState<SearchMode>(defaultMode);
@@ -34,16 +36,89 @@ export function useSearch(options: UseSearchOptions = {}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [entityFilter, setEntityFilter] = useState<EntityFilter>({});
+  const [pendingQuery, setPendingQuery] = useState<string>('');
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('memglyph-search-history');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const debounceTimerRef = useRef<number | null>(null);
 
   /**
-   * Execute search based on current mode
+   * Debounce effect - executes search after delay
    */
-  const search = async (query: string) => {
+  useEffect(() => {
+    if (!pendingQuery.trim()) return;
+
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // Set new timer
+    debounceTimerRef.current = window.setTimeout(() => {
+      executeSearch(pendingQuery);
+    }, debounceMs);
+
+    // Cleanup on unmount or when pendingQuery changes
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [pendingQuery, mode, entityFilter]);
+
+  /**
+   * Add query to search history
+   */
+  const addToHistory = (query: string) => {
+    if (!query.trim()) return;
+
+    const trimmed = query.trim();
+    setSearchHistory((prev) => {
+      // Remove duplicates and add to front
+      const filtered = prev.filter((q) => q !== trimmed);
+      const updated = [trimmed, ...filtered].slice(0, 10); // Keep last 10
+
+      // Save to localStorage
+      try {
+        localStorage.setItem('memglyph-search-history', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('[Search] Failed to save history:', e);
+      }
+
+      return updated;
+    });
+  };
+
+  /**
+   * Clear search history
+   */
+  const clearHistory = () => {
+    setSearchHistory([]);
+    try {
+      localStorage.removeItem('memglyph-search-history');
+    } catch (e) {
+      console.warn('[Search] Failed to clear history:', e);
+    }
+  };
+
+  /**
+   * Execute search based on current mode (internal implementation)
+   */
+  const executeSearch = async (query: string) => {
     if (!query.trim()) return;
 
     setLoading(true);
     setError(null);
     setLastQuery(query);
+
+    // Add to history
+    addToHistory(query);
 
     try {
       const dbClient = getDbClient();
@@ -81,12 +156,37 @@ export function useSearch(options: UseSearchOptions = {}) {
   };
 
   /**
+   * Debounced search - sets pending query and waits for debounce
+   */
+  const search = (query: string) => {
+    setPendingQuery(query);
+  };
+
+  /**
+   * Immediate search - bypasses debounce (useful for button clicks)
+   */
+  const searchImmediate = (query: string) => {
+    // Clear any pending debounced search
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    setPendingQuery('');
+    return executeSearch(query);
+  };
+
+  /**
    * Clear search results
    */
   const clear = () => {
     setResults(null);
     setLastQuery('');
     setError(null);
+    setPendingQuery('');
+
+    // Clear debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
   };
 
   /**
@@ -123,13 +223,16 @@ export function useSearch(options: UseSearchOptions = {}) {
     loading,
     error,
     entityFilter,
+    searchHistory, // Recent search queries
 
     // Actions
-    search,
+    search, // Debounced search
+    searchImmediate, // Immediate search (no debounce)
     clear,
     changeMode,
     setFilter,
     clearFilter,
+    clearHistory, // Clear search history
   };
 }
 
