@@ -1733,3 +1733,254 @@ button:disabled {
     min-height: 400px;
   }
 }
+
+/* ============================================================================
+   Provenance & Verification (Sprint 5)
+   ============================================================================ */
+
+/* Provenance Panel */
+.provenance-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.provenance-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.provenance-header h3 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+/* Provenance Tabs */
+.provenance-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 1rem;
+  border-bottom: 2px solid var(--color-border);
+  background: var(--color-hover);
+}
+
+.provenance-tab {
+  background: transparent;
+  border: none;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  color: #6b7280;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.2s;
+}
+
+.provenance-tab:hover {
+  color: var(--color-fg);
+}
+
+.provenance-tab.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+  background: var(--color-bg);
+}
+
+.provenance-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+
+/* Checkpoint Timeline */
+.checkpoint-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.checkpoint-item {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--color-bg);
+  transition: border-color 0.2s;
+}
+
+.checkpoint-item:hover {
+  border-color: var(--color-primary);
+}
+
+.checkpoint-latest {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1);
+}
+
+.checkpoint-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+
+.checkpoint-epoch {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkpoint-badge {
+  background: var(--color-primary);
+  color: white;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.checkpoint-epoch-value {
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.checkpoint-date {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.checkpoint-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.checkpoint-field {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.checkpoint-timeline-loading,
+.checkpoint-timeline-error,
+.checkpoint-timeline-empty {
+  padding: 2rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+.checkpoint-timeline-empty .hint {
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+  opacity: 0.7;
+}
+
+/* Verification Panel */
+.verification-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1rem;
+  background: var(--color-bg);
+}
+
+.verification-success {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.verification-failure {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.verification-header {
+  margin-bottom: 1rem;
+}
+
+.verification-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.verification-success .status-icon {
+  color: #10b981;
+  font-size: 1.5rem;
+}
+
+.verification-failure .status-icon {
+  color: #ef4444;
+  font-size: 1.5rem;
+}
+
+.verification-success .status-text {
+  color: #10b981;
+}
+
+.verification-failure .status-text {
+  color: #ef4444;
+}
+
+.verification-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.verification-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.field-label {
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.field-value {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  word-break: break-all;
+}
+
+.verification-footer {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.verification-loading,
+.verification-empty {
+  padding: 2rem;
+  text-align: center;
+  color: #6b7280;
+}
+
+/* Page Preview Actions */
+.page-preview-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-secondary.active {
+  background: var(--color-primary);
+  color: white;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .provenance-panel {
+    max-height: 50vh;
+  }
+}

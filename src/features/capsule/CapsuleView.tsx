@@ -9,10 +9,12 @@ import type { CapsuleInfo } from '../../db/rpc-contract';
 import { useSearch } from '../search';
 import { useEntities } from '../entities';
 import { useGraph } from '../graph';
+import { useProvenance } from '../provenance';
 import { SearchPanel } from '../search/SearchPanel';
 import { EntityPanel } from '../entities/EntityPanel';
 import { PagePreviewPanel } from '../page';
 import { GraphPanel, GraphControls, GraphStats } from '../graph';
+import { ProvenancePanel } from '../provenance';
 import { CapsuleLayout, TopBar, FilterPanel } from '../layouts';
 
 type ViewMode = 'search' | 'graph';
@@ -25,11 +27,13 @@ export interface CapsuleViewProps {
 export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('search');
   const [selectedPageGid, setSelectedPageGid] = useState<string | null>(null);
+  const [showProvenance, setShowProvenance] = useState(false);
 
   // Feature hooks
   const search = useSearch({ defaultMode: 'fts' });
   const entities = useEntities({ autoLoad: true });
   const graph = useGraph({ maxHops: 2, limit: 50 });
+  const provenance = useProvenance({ autoLoadCheckpoints: true });
 
   // Handle entity filter selection
   const handleEntityClick = (entityType: string, entityValue: string) => {
@@ -75,6 +79,14 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
     }
   };
 
+  // Handle page verification
+  const handleVerifyPage = () => {
+    if (selectedPageGid) {
+      provenance.verifyPage(selectedPageGid);
+      setShowProvenance(true); // Show provenance panel when verifying
+    }
+  };
+
   // Check if entity filter is active
   const hasActiveEntityFilter = Boolean(
     search.entityFilter.entityType || search.entityFilter.entityValue
@@ -87,11 +99,19 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
           capsuleName={capsuleInfo.fileName}
           onClose={onClose}
           actions={
-            <div className="capsule-stats">
-              <span>{capsuleInfo.pageCount} pages</span>
-              <span>{capsuleInfo.entityCount} entities</span>
-              <span>{capsuleInfo.edgeCount} edges</span>
-            </div>
+            <>
+              <div className="capsule-stats">
+                <span>{capsuleInfo.pageCount} pages</span>
+                <span>{capsuleInfo.entityCount} entities</span>
+                <span>{capsuleInfo.edgeCount} edges</span>
+              </div>
+              <button
+                className={`btn-secondary btn-sm ${showProvenance ? 'active' : ''}`}
+                onClick={() => setShowProvenance(!showProvenance)}
+              >
+                {showProvenance ? '✓' : ''} Provenance
+              </button>
+            </>
           }
         />
       }
@@ -209,14 +229,23 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
             <div className="page-preview-section">
               <div className="page-preview-header-actions">
                 <h3>Page Preview</h3>
-                {viewMode === 'search' && (
+                <div className="page-preview-actions">
+                  {viewMode === 'search' && (
+                    <button
+                      className="btn-secondary btn-sm"
+                      onClick={() => handleExploreGraph(selectedPageGid)}
+                    >
+                      Explore Graph
+                    </button>
+                  )}
                   <button
-                    className="btn-secondary btn-sm"
-                    onClick={() => handleExploreGraph(selectedPageGid)}
+                    className="btn-primary btn-sm"
+                    onClick={handleVerifyPage}
+                    disabled={provenance.verifying}
                   >
-                    Explore Graph
+                    {provenance.verifying ? 'Verifying...' : 'Verify Page'}
                   </button>
-                )}
+                </div>
               </div>
               <PagePreviewPanel
                 selectedGid={selectedPageGid}
@@ -226,8 +255,20 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
           )}
         </div>
       }
+      rightSidebar={
+        showProvenance && (
+          <ProvenancePanel
+            checkpoints={provenance.checkpoints}
+            verificationResult={provenance.verificationResult}
+            loading={provenance.loading}
+            verifying={provenance.verifying}
+            error={provenance.error}
+            onVerify={handleVerifyPage}
+          />
+        )
+      }
       showLeftSidebar={true}
-      showRightSidebar={false}
+      showRightSidebar={showProvenance}
     />
   );
 }
