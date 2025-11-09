@@ -1984,3 +1984,161 @@ button:disabled {
     max-height: 50vh;
   }
 }
+
+/* ============================================================================
+   LLM Reasoning (Sprint 6)
+   ============================================================================ */
+
+/* LLM Section */
+.llm-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid var(--color-border);
+}
+
+/* LLM Progress Bar */
+.llm-progress-bar {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: rgba(37, 99, 235, 0.05);
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 8px;
+}
+
+.llm-progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-fg);
+}
+
+.llm-progress-track {
+  height: 8px;
+  background: rgba(37, 99, 235, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.llm-progress-fill {
+  height: 100%;
+  background: var(--color-primary);
+  transition: width 0.3s ease;
+}
+
+/* Reasoning Output */
+.reasoning-output {
+  background: var(--color-bg);
+  border: 2px solid var(--color-primary);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-top: 1rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.reasoning-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.reasoning-header h4 {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.reasoning-meta {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-family: var(--font-mono);
+}
+
+.reasoning-answer {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--color-fg);
+  margin-bottom: 1rem;
+  white-space: pre-wrap;
+}
+
+.reasoning-citations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.875rem;
+}
+
+.reasoning-citations strong {
+  color: #6b7280;
+}
+
+.citation {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  background: var(--color-primary);
+  color: white;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.reasoning-loading {
+  text-align: center;
+  padding: 3rem;
+  color: #6b7280;
+}
+
+.reasoning-loading .spinner {
+  margin: 0 auto 1rem;
+}
+
+/* LLM Error Panel */
+.llm-error-panel {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  padding: 1rem;
+  color: #ef4444;
+  font-size: 0.875rem;
+}
+
+.llm-no-results {
+  text-align: center;
+  padding: 2rem;
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* LLM Toggle Styling */
+.btn-secondary.active {
+  background: var(--color-primary);
+  color: white;
+  font-weight: 600;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .reasoning-output {
+    padding: 1rem;
+  }
+  
+  .reasoning-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  
+  .reasoning-meta {
+    font-size: 0.65rem;
+  }
+}

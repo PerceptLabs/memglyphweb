@@ -4,17 +4,19 @@
  * Main view for browsing an opened capsule with search, filters, graph, and preview.
  */
 
-import { useState } from 'preact/hooks';
+import { useState, useEffect } from 'preact/hooks';
 import type { CapsuleInfo } from '../../db/rpc-contract';
 import { useSearch } from '../search';
 import { useEntities } from '../entities';
 import { useGraph } from '../graph';
 import { useProvenance } from '../provenance';
+import { useLlm } from '../llm';
 import { SearchPanel } from '../search/SearchPanel';
 import { EntityPanel } from '../entities/EntityPanel';
 import { PagePreviewPanel } from '../page';
 import { GraphPanel, GraphControls, GraphStats } from '../graph';
 import { ProvenancePanel } from '../provenance';
+import { ReasoningOutput } from '../llm/LlmPanel';
 import { CapsuleLayout, TopBar, FilterPanel } from '../layouts';
 
 type ViewMode = 'search' | 'graph';
@@ -34,6 +36,7 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
   const entities = useEntities({ autoLoad: true });
   const graph = useGraph({ maxHops: 2, limit: 50 });
   const provenance = useProvenance({ autoLoadCheckpoints: true });
+  const llm = useLlm({ autoReason: false });
 
   // Handle entity filter selection
   const handleEntityClick = (entityType: string, entityValue: string) => {
@@ -87,6 +90,26 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
     }
   };
 
+  // Handle LLM reasoning trigger
+  const handleAskLlm = async () => {
+    if (llm.enabled && search.results && search.results.length > 0 && search.lastQuery) {
+      // Clear previous reasoning
+      llm.clearReasoning();
+      // Trigger reasoning with top-5 results (max 1500 tokens as per spec)
+      await llm.reason(search.lastQuery, search.results, 1500);
+    }
+  };
+
+  // Auto-trigger reasoning when LLM is enabled and search completes
+  useEffect(() => {
+    if (llm.enabled && search.results && search.results.length > 0 && search.lastQuery) {
+      // Only auto-reason if we don't have reasoning for this query yet
+      if (!llm.reasoning || llm.reasoning.usedSnippets.length === 0) {
+        handleAskLlm();
+      }
+    }
+  }, [llm.enabled, search.results, search.lastQuery]);
+
   // Check if entity filter is active
   const hasActiveEntityFilter = Boolean(
     search.entityFilter.entityType || search.entityFilter.entityValue
@@ -105,6 +128,14 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                 <span>{capsuleInfo.entityCount} entities</span>
                 <span>{capsuleInfo.edgeCount} edges</span>
               </div>
+              <button
+                className={`btn-secondary btn-sm ${llm.enabled ? 'active' : ''}`}
+                onClick={llm.toggle}
+                disabled={llm.loading}
+                title={llm.modelInfo?.loaded ? 'LLM Ready' : 'Click to load LLM'}
+              >
+                🤖 {llm.enabled ? 'LLM On' : 'LLM Off'}
+              </button>
               <button
                 className={`btn-secondary btn-sm ${showProvenance ? 'active' : ''}`}
                 onClick={() => setShowProvenance(!showProvenance)}
@@ -182,6 +213,54 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                 placeholder="Search the capsule..."
                 searchHint='Try: "vector search", "LEANN", "SQLite", or "hybrid retrieval"'
               />
+
+              {/* LLM Reasoning Output */}
+              {llm.enabled && search.results && search.results.length > 0 && (
+                <div className="llm-section">
+                  {llm.progress && (
+                    <div className="llm-progress-bar">
+                      <div className="llm-progress-info">
+                        <span>🤖 {llm.progress.message}</span>
+                        <span>{(llm.progress.progress * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="llm-progress-track">
+                        <div
+                          className="llm-progress-fill"
+                          style={{ width: `${llm.progress.progress * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {llm.reasoning && (
+                    <ReasoningOutput
+                      reasoning={llm.reasoning}
+                      searchResults={search.results}
+                      loading={llm.loading}
+                    />
+                  )}
+
+                  {llm.loading && !llm.reasoning && !llm.progress && (
+                    <div className="reasoning-loading">
+                      <div className="spinner"></div>
+                      <p>LLM is reasoning over search results...</p>
+                    </div>
+                  )}
+
+                  {llm.error && (
+                    <div className="llm-error-panel">
+                      <strong>⚠️ LLM Error:</strong> {llm.error}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Show message when LLM is enabled but no results */}
+              {llm.enabled && (!search.results || search.results.length === 0) && search.lastQuery && (
+                <div className="llm-no-results">
+                  <p>🤖 LLM needs search results to reason. Try searching first!</p>
+                </div>
+              )}
             </>
           )}
 
