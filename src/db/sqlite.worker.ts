@@ -40,6 +40,13 @@ const REQUIRED_TABLES = [
   'keys'
 ];
 
+// Query safety limits
+// TODO: Timeout enforcement requires async wrapper around synchronous SQLite ops
+// For now, MAX_QUERY_RESULTS and MAX_FTS_RESULTS provide protection against runaway queries
+const QUERY_TIMEOUT_MS = 10000; // 10 seconds max per query (aspirational)
+const MAX_QUERY_RESULTS = 10000; // Maximum rows returned per query
+const MAX_FTS_RESULTS = 1000; // Maximum FTS search results
+
 let db: any = null;
 let sqlite3: any = null;
 let currentCapsuleInfo: CapsuleInfo | null = null;
@@ -379,6 +386,9 @@ function searchFts(
 ): RpcResponse<FtsResult[]> {
   if (!db) return { ok: false, error: 'No database open' };
 
+  // Clamp limit to prevent resource exhaustion
+  const clampedLimit = Math.min(limit, MAX_FTS_RESULTS);
+
   const results: FtsResult[] = [];
 
   // Use entity-filtered query if filters are provided
@@ -395,11 +405,11 @@ function searchFts(
         entityType || null,
         entityValue || null,
         entityValue || null,
-        limit
+        clampedLimit
       ]);
     } else {
       // Bind parameters for regular FTS query
-      stmt.bind([query, limit]);
+      stmt.bind([query, clampedLimit]);
     }
 
     while (stmt.step()) {
@@ -428,6 +438,9 @@ function searchVector(queryVector: Float32Array, limit: number): RpcResponse<Vec
   if (!currentCapsuleInfo?.hasVectors) {
     return { ok: false, error: 'No vectors available in capsule' };
   }
+
+  // Clamp limit to prevent resource exhaustion
+  const clampedLimit = Math.min(limit, MAX_QUERY_RESULTS);
 
   const results: VectorResult[] = [];
   const model = currentCapsuleInfo.vectorModel || 'gte-small-384';
@@ -469,7 +482,7 @@ function searchVector(queryVector: Float32Array, limit: number): RpcResponse<Vec
 
     // Sort by similarity (descending) and limit
     results.sort((a, b) => b.similarity - a.similarity);
-    results.splice(limit);
+    results.splice(clampedLimit);
 
     return { ok: true, data: results };
   } catch (error) {
@@ -483,11 +496,14 @@ function searchVector(queryVector: Float32Array, limit: number): RpcResponse<Vec
 function searchHybrid(query: string, limit: number, weights?: Partial<typeof DEFAULT_FUSION_WEIGHTS>): RpcResponse<HybridResult[]> {
   if (!db) return { ok: false, error: 'No database open' };
 
+  // Clamp limit to prevent resource exhaustion
+  const clampedLimit = Math.min(limit, MAX_QUERY_RESULTS);
+
   const fusionWeights = { ...DEFAULT_FUSION_WEIGHTS, ...weights };
 
   try {
     // Step 1: FTS Search
-    const ftsResponse = searchFts(query, Math.min(limit * 3, 50));
+    const ftsResponse = searchFts(query, Math.min(clampedLimit * 3, 50));
     if (!ftsResponse.ok) return ftsResponse as RpcResponse<HybridResult[]>;
     const ftsResults = ftsResponse.data!;
 
@@ -546,7 +562,7 @@ function searchHybrid(query: string, limit: number, weights?: Partial<typeof DEF
 
     // Step 3: Graph Boosting (neighbor hints)
     // For top N candidates, check if they're connected
-    const topGids = Array.from(candidates.keys()).slice(0, Math.min(10, limit));
+    const topGids = Array.from(candidates.keys()).slice(0, Math.min(10, clampedLimit));
     for (const gid of topGids) {
       const candidate = candidates.get(gid)!;
       const graphStmt = db.prepare(QUERIES.GET_GRAPH_NEIGHBORS);
@@ -595,7 +611,7 @@ function searchHybrid(query: string, limit: number, weights?: Partial<typeof DEF
 
     // Sort by final score
     finalResults.sort((a, b) => b.scores.final - a.scores.final);
-    finalResults.splice(limit);
+    finalResults.splice(clampedLimit);
 
     return { ok: true, data: finalResults };
   } catch (error) {
@@ -607,11 +623,14 @@ function searchHybrid(query: string, limit: number, weights?: Partial<typeof DEF
 function listEntities(entityType?: string, limit: number = 100): RpcResponse<EntityFacet[]> {
   if (!db) return { ok: false, error: 'No database open' };
 
+  // Clamp limit to prevent resource exhaustion
+  const clampedLimit = Math.min(limit, MAX_QUERY_RESULTS);
+
   const results: EntityFacet[] = [];
   const stmt = db.prepare(QUERIES.LIST_ENTITY_FACETS);
 
   try {
-    stmt.bind([entityType || null, limit]);
+    stmt.bind([entityType || null, clampedLimit]);
 
     while (stmt.step()) {
       const row = stmt.get([]);
@@ -634,11 +653,14 @@ function listEntities(entityType?: string, limit: number = 100): RpcResponse<Ent
 function getPageList(limit: number, offset: number): RpcResponse<PageInfo[]> {
   if (!db) return { ok: false, error: 'No database open' };
 
+  // Clamp limit to prevent resource exhaustion
+  const clampedLimit = Math.min(limit, MAX_QUERY_RESULTS);
+
   const results: PageInfo[] = [];
   const stmt = db.prepare(QUERIES.GET_PAGE_LIST);
 
   try {
-    stmt.bind([limit, offset]);
+    stmt.bind([clampedLimit, offset]);
 
     while (stmt.step()) {
       const row = stmt.get([]);
@@ -759,6 +781,9 @@ function graphHops(
 ): RpcResponse<{ nodes: GraphNode[]; edges: GraphEdge[]; distances: Record<string, number> }> {
   if (!db) return { ok: false, error: 'No database open' };
 
+  // Clamp limit to prevent resource exhaustion
+  const clampedLimit = Math.min(limit, MAX_QUERY_RESULTS);
+
   try {
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
@@ -770,7 +795,7 @@ function graphHops(
     queue.push({ gid: seedGid, distance: 0 });
     distances[seedGid] = 0;
 
-    while (queue.length > 0 && nodes.length < limit) {
+    while (queue.length > 0 && nodes.length < clampedLimit) {
       const { gid, distance } = queue.shift()!;
 
       // Skip if already visited or exceeded max hops

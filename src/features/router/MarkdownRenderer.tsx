@@ -1,9 +1,10 @@
 /**
  * Simple Markdown Renderer
  *
- * Renders basic markdown to HTML.
- * For production, consider using a library like marked or react-markdown.
+ * Renders basic markdown to HTML with XSS protection via DOMPurify.
  */
+
+import DOMPurify from 'dompurify';
 
 export interface MarkdownRendererProps {
   content: string;
@@ -12,10 +13,17 @@ export interface MarkdownRendererProps {
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const html = renderMarkdown(content);
 
+  // Sanitize HTML to prevent XSS attacks
+  const sanitizedHtml = DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'strong', 'em', 'code', 'pre', 'a', 'ul', 'ol', 'li'],
+    ALLOWED_ATTR: ['href'],
+    ALLOW_DATA_ATTR: false,
+  });
+
   return (
     <div
       className="markdown-content"
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
     />
   );
 }

@@ -4,6 +4,7 @@
  * Provides UI for search functionality with mode selection.
  */
 
+import DOMPurify from 'dompurify';
 import type { SearchMode } from './useSearch';
 import type { HybridResult } from '../../db/types';
 
@@ -137,7 +138,12 @@ export function SearchResults({ results, query, onResultClick }: SearchResultsPr
           {result.snippet && (
             <p
               className="result-snippet"
-              dangerouslySetInnerHTML={{ __html: result.snippet }}
+              dangerouslySetInnerHTML={{
+                __html: DOMPurify.sanitize(result.snippet, {
+                  ALLOWED_TAGS: ['mark', 'strong', 'em', 'b', 'i'],
+                  ALLOWED_ATTR: [],
+                })
+              }}
             />
           )}
           <div className="result-scores">

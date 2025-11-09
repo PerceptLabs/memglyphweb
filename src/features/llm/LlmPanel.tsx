@@ -5,6 +5,7 @@
  */
 
 import { useState } from 'preact/hooks';
+import DOMPurify from 'dompurify';
 import type { HybridResult } from '../../db/types';
 import type { UseLlmOptions } from './useLlm';
 import { useLlm } from './useLlm';
@@ -194,7 +195,12 @@ export function ReasoningOutput({ reasoning, searchResults, loading }: Reasoning
                     {result.snippet && (
                       <div
                         className="citation-tooltip-snippet"
-                        dangerouslySetInnerHTML={{ __html: result.snippet }}
+                        dangerouslySetInnerHTML={{
+                          __html: DOMPurify.sanitize(result.snippet, {
+                            ALLOWED_TAGS: ['mark', 'strong', 'em', 'b', 'i'],
+                            ALLOWED_ATTR: [],
+                          })
+                        }}
                       />
                     )}
                     <div className="citation-tooltip-meta">
