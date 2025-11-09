@@ -237,10 +237,13 @@ VITE_MODE=viewer
 ### Optional Features
 
 - **🤖 LLM Reasoning** (can be disabled)
-  - Qwen 3 0.6B model
-  - Local inference (Wllama)
-  - RAG-style Q&A
-  - Citation tracking
+  - Qwen 3 0.6B model (runs locally via Wllama)
+  - Auto-reasoning on search results
+  - Constrained prompting (answers only from snippets)
+  - Top-5 snippet synthesis with 1500 token limit
+  - GID citation tracking (hallucination prevention)
+  - Real-time progress visualization
+  - Works completely offline
 
 - **📊 Advanced Visualizations**
   - Bar, line, scatter, area charts
@@ -253,6 +256,43 @@ VITE_MODE=viewer
   - Multi-hop traversal
   - Relevance ranking
   - Visual connections
+
+---
+
+## 🧠 How LLM Reasoning Works
+
+The optional LLM feature provides **constrained reasoning** over your search results:
+
+### 1. **Search First**
+When you search your capsule, the system retrieves relevant snippets using hybrid search (FTS5 + entities + graph).
+
+### 2. **Auto-Reasoning**
+If LLM is enabled, it automatically:
+- Takes the **top 5 search results** as context
+- Sends them to a tiny local AI model (Qwen 3 0.6B)
+- Generates an answer using **only** those snippets
+
+### 3. **Constrained Prompting**
+The LLM is instructed to:
+- ✅ Answer ONLY from provided snippets
+- ✅ Cite GID (Glyph ID) for every fact
+- ✅ Say "insufficient evidence" if answer isn't in snippets
+- ❌ Never hallucinate or use outside knowledge
+
+### 4. **Citation Tracking**
+Every fact in the answer is linked back to a specific snippet (GID). Click a citation to see the source.
+
+### 5. **Hallucination Prevention**
+- GID extraction validates all citations are real
+- Stop tokens prevent thinking mode leakage
+- 1500 token limit keeps responses focused
+
+### Why This Matters
+Unlike cloud LLMs that might "make up" answers, this approach:
+- **Offline-first** - No API calls, no data leakage
+- **Transparent** - Every claim has a traceable source
+- **Constrained** - Can't invent facts not in your capsule
+- **Fast** - Tiny model (0.6B params) runs in browser
 
 ---
 
@@ -279,7 +319,7 @@ npm run test:coverage
 - ✅ GCUI detection (7 tests)
 - ✅ Search hooks (8 tests)
 - ✅ Entity hooks (8 tests)
-- ⏳ LLM hooks (coming soon)
+- ✅ LLM integration (implemented, tests pending)
 - ⏳ Chart rendering (coming soon)
 
 ---
