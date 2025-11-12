@@ -6,3 +6,9 @@
 
 export { CapsuleView } from './CapsuleView';
 export type { CapsuleViewProps } from './CapsuleView';
+
+export { ModalityBadge } from './ModalityBadge';
+export type { ModalityBadgeProps } from './ModalityBadge';
+
+export { useGlyphCase } from './useGlyphCase';
+export type { UseGlyphCaseReturn } from './useGlyphCase';
