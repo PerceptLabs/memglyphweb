@@ -1,8 +1,8 @@
-# GlyphCapsule PWA - Implementation Guide
+# GlyphCase PWA - Implementation Guide
 
-**Role**: Senior full-stack engineer implementing a production-grade PWA that opens and queries a Glyphcapsule (*.mgx.sqlite) entirely client-side.
+**Role**: Senior full-stack engineer implementing a production-grade PWA that opens and queries a GlyphCase (*.mgx.sqlite) entirely client-side.
 
-**Goal**: Deliver an offline-capable app that (1) loads a Glyphcapsule, (2) searches via FTS5, (3) explores entities & graph edges, (4) verifies checkpoints/signatures, (5) optionally hands top-K snippets to a tiny LLM for reasoning, and (6) runs with zero backend.
+**Goal**: Deliver an offline-capable app that (1) loads a GlyphCase, (2) searches via FTS5, (3) explores entities & graph edges, (4) verifies checkpoints/signatures, (5) optionally hands top-K snippets to a tiny LLM for reasoning, and (6) runs with zero backend.
 
 ---
 

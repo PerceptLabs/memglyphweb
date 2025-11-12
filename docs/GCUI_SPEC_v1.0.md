@@ -1,14 +1,14 @@
-# GlyphCapsule UI Specification v1.0
+# Glyph Case UI Specification v1.0
 
-**GCUI Spec v1.0** — Declarative website and dashboard rendering from SQLAR capsules.
+**GCUI Spec v1.0** — Declarative website and dashboard rendering from SQLAR cases.
 
 ## Overview
 
-The GlyphCapsule UI (GCUI) specification defines how SQLAR capsules can optionally include metadata to render as beautiful websites, dashboards, or interactive applications—while remaining fully agnostic to readers that don't implement the spec.
+The Glyph Case UI (GCUI) specification defines how SQLAR cases can optionally include metadata to render as beautiful websites, dashboards, or interactive applications—while remaining fully agnostic to readers that don't implement the spec.
 
 ### Core Principles
 
-1. **Capsules stay agnostic** — Data first. UI hints are purely optional via `_ui_*` tables.
+1. **Cases stay agnostic** — Data first. UI hints are purely optional via `_ui_*` tables.
 2. **Readers may ignore** — GCUI tables are suggestions, not requirements. Readers can fall back to generic database browsing.
 3. **Declarative, not imperative** — Describe what to render (data, layout), not how (no code execution).
 4. **Security first** — Read-only by default, sanitized content, performance limits.
@@ -26,7 +26,7 @@ Readers detect mode by checking for specific tables:
 | `_ui_dashboards` | **Dashboard** | Data visualizations and charts |
 | Neither | **Generic Browser** | Table viewer with search |
 
-Modes are not mutually exclusive—capsules can have both pages and dashboards.
+Modes are not mutually exclusive—cases can have both pages and dashboards.
 
 ---
 
@@ -328,7 +328,7 @@ CREATE TABLE sqlar (
 
 **Read-only by default:**
 - GCUI spec does not define write operations
-- Capsules are immutable once loaded (readers may allow edits in OPFS but not save back)
+- Cases are immutable once loaded (readers may allow edits in OPFS but not save back)
 
 **Content sanitization:**
 - Markdown rendered to HTML must sanitize XSS vectors
@@ -483,9 +483,9 @@ INSERT INTO _ui_dashboards VALUES
 4. (Optional) Add navigation, dashboards
 
 **Tooling (future):**
-- CLI: `gcui init my-capsule.sqlar` — Add GCUI tables
-- CLI: `gcui validate my-capsule.sqlar` — Check compliance
-- CLI: `gcui preview my-capsule.sqlar` — Local dev server
+- CLI: `gcui init my-case.sqlar` — Add GCUI tables
+- CLI: `gcui validate my-case.sqlar` — Check compliance
+- CLI: `gcui preview my-case.sqlar` — Local dev server
 
 ---
 

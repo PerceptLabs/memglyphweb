@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Create a sample Glyphcapsule about MemGlyph for demo purposes.
-This is a meta-capsule: MemGlyph documentation in MemGlyph format!
+Create a sample GlyphCase about MemGlyph for demo purposes.
+This is a meta-case: MemGlyph documentation in MemGlyph format!
 """
 
 import sqlite3
@@ -39,13 +39,13 @@ PAGES = [
     },
     {
         "page_no": 3,
-        "title": "Glyphcapsule Modality",
-        "full_text": """A Glyphcapsule is a SQLite-based container using SQLAR format for archival storage.
+        "title": "GlyphCase Modality",
+        "full_text": """A GlyphCase is a SQLite-based container using SQLAR format for archival storage.
         The sqlar table contains byte-for-byte representation of the source corpus, while accelerator
         tables provide fast queries. All accelerators are rebuildable from the canonical sqlar data.
         This enables atomic operations and efficient distribution of large document collections.""",
         "entities": [
-            ("TECH", "Glyphcapsule", "Glyphcapsule"),
+            ("TECH", "GlyphCase", "GlyphCase"),
             ("TECH", "SQLite", "SQLite"),
             ("TECH", "SQLAR", "SQLAR"),
         ]

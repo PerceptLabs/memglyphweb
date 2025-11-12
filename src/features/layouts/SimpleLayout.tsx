@@ -27,7 +27,7 @@ export function SimpleLayout({ config, title, children }: SimpleLayoutProps) {
       </main>
 
       <footer className="simple-footer">
-        <p>Powered by GlyphCapsule</p>
+        <p>Powered by GlyphCase</p>
       </footer>
     </div>
   );

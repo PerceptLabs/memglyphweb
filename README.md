@@ -1,6 +1,6 @@
-# 🔮 MemGlyph - Knowledge Crystallized
+# 🔮 MemGlyph - Knowledge Unlocked
 
-**Transform your SQLAR capsules into beautiful, queryable websites.**
+**Transform your SQLAR files into beautiful, queryable websites with dynamic memory.**
 
 <div align="center">
 
@@ -33,7 +33,7 @@ Traditional websites need:
 - Build systems (complexity)
 - Internet connection (always online)
 
-**MemGlyph capsules are different:**
+**MemGlyph GlyphCases are different:**
 - ✅ **One file** contains everything (content + data + search)
 - ✅ **No server** required (runs in browser with SQLite WASM)
 - ✅ **Offline-first** (works on planes, in restricted environments)
@@ -144,7 +144,7 @@ src/
 
 ### GCUI Spec v1.0
 
-The **GlyphCapsule UI Specification** defines how SQLAR files render as websites.
+The **Glyph Case UI Specification** defines how SQLAR files render as websites.
 
 **Core Principles:**
 - 📄 **Declarative** - Describe what to render, not how
@@ -222,6 +222,15 @@ VITE_MODE=viewer
   - Entity-aware search
   - Graph traversal
 
+- **✅ Dynamic GlyphCase (v1.1)**
+  - **Static Mode** - Read-only immutable knowledge (Core)
+  - **Dynamic Mode** - Episodic memory with Envelope layer
+  - **Envelope** - Hash-chained append-only runtime learning
+  - **Stream** - Event bus for real-time coordination
+  - **Activity Timeline** - Chronological visualization of searches, feedback, and summaries
+  - **Export Envelopes** - For external remint tooling
+  - **Integrity Verification** - SHA-256 Merkle chain validation
+
 - **✅ GCUI Rendering**
   - Website mode (_ui_pages)
   - Dashboard mode (_ui_dashboards)
@@ -291,8 +300,65 @@ Every fact in the answer is linked back to a specific snippet (GID). Click a cit
 Unlike cloud LLMs that might "make up" answers, this approach:
 - **Offline-first** - No API calls, no data leakage
 - **Transparent** - Every claim has a traceable source
-- **Constrained** - Can't invent facts not in your capsule
+- **Constrained** - Can't invent facts not in your GlyphCase
 - **Fast** - Tiny model (0.6B params) runs in browser
+
+---
+
+## 🧠 Dynamic GlyphCase: Memory & RAG Edition
+
+**GlyphCase v1.1** introduces a three-tier memory model inspired by cognitive science:
+
+### Three-Tier Memory Architecture
+
+1. **Core (Semantic Substrate)** - Long-term immutable knowledge
+   - FTS5 full-text search
+   - Entity graph
+   - Vector embeddings (optional)
+   - **Read-only** - Never modified after creation
+
+2. **Envelope (Episodic Memory)** - Runtime learning layer
+   - Append-only SQLite database
+   - Hash-chained integrity (SHA-256 Merkle chain)
+   - Stored separately in OPFS
+   - Captures: search queries, feedback signals, LLM interactions, embeddings
+   - **Exportable** for external remint tooling
+
+3. **Stream (Working Memory)** - Ephemeral event bus
+   - Real-time pub/sub coordination
+   - Events: retrieval.query, retrieval.result, llm.prompt, llm.output, feedback.signal
+   - Connects features without tight coupling
+
+### Static vs Dynamic Modes
+
+**Static Mode (📦):**
+- Core only (no Envelope)
+- Traditional read-only exploration
+- Perfect for stable knowledge bases
+
+**Dynamic Mode (🧠):**
+- Core + Envelope + Stream
+- Records all interactions
+- Builds episodic memory over time
+- Exports for reminting (consolidating Envelope → Core)
+
+### Key Features
+
+- **🔗 Hash Chaining** - Cryptographic integrity for all Envelope data
+- **📜 Activity Timeline** - Visual history of searches, feedback, summaries
+- **📦 Export Envelopes** - For external Python/Node remint tools
+- **✓ Integrity Verification** - Validate hash chain before reminting
+- **🔄 Remint Ready** - Complete workflow for knowledge consolidation
+
+### Reminting Workflow
+
+1. **Capture** - Use Dynamic mode, search, give feedback
+2. **Export** - Download `.db` envelope file
+3. **Validate** - Verify hash chain integrity
+4. **Review** - Analyze feedback, embeddings, patterns
+5. **Remint** - Consolidate valuable data back into Core (external tool)
+
+[Read the complete Remint Guide →](docs/REMINT.md)
 
 ---
 
@@ -368,11 +434,12 @@ npm test             # Run tests
 
 ## 📚 Documentation
 
-- [GCUI Spec v1.0](docs/GCUI_SPEC_v1.0.md) - Complete specification
+- [GCUI Spec v1.0](docs/GCUI_SPEC_v1.0.md) - Glyph Case UI specification
+- [Remint Guide](docs/REMINT.md) - GlyphCase reminting workflow
+- [Deployment Guide](docs/DEPLOYMENT.md) - Production deployment with security
 - [Architecture](#-architecture) - System design
 - [Boilerplate Guide](#-using-as-a-boilerplate) - Fork & customize
 - [Features](#-features) - What's included
-- [API Reference](#) - Coming soon
 
 ---
 
@@ -463,6 +530,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 **Made with ❤️ by [PerceptLabs](https://github.com/PerceptLabs)**
 
-*Your knowledge, crystallized.*
+*Your knowledge, unlocked.*
 
 </div>

@@ -1,8 +1,8 @@
 {
-  "name": "glyphcapsule-pwa",
+  "name": "glyphcase-pwa",
   "version": "0.1.0",
   "type": "module",
-  "description": "Offline-capable PWA for exploring Glyphcapsule (MemGlyph) databases with hybrid retrieval",
+  "description": "Offline-capable PWA for exploring GlyphCase (MemGlyph) databases with hybrid retrieval and dynamic memory",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

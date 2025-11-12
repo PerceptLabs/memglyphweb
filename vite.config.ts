@@ -10,9 +10,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['*.mgx.sqlite', 'favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Glyphcapsule Explorer',
-        short_name: 'Glyphcapsule',
-        description: 'Offline-capable PWA for exploring MemGlyph Glyphcapsules with hybrid retrieval',
+        name: 'GlyphCase Explorer',
+        short_name: 'GlyphCase',
+        description: 'Offline-capable PWA for exploring MemGlyph GlyphCases with hybrid retrieval and dynamic memory',
         theme_color: '#1a1a1a',
         background_color: '#ffffff',
         display: 'standalone',

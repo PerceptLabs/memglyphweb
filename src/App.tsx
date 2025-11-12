@@ -149,8 +149,8 @@ export function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Glyphcapsule Explorer</h1>
-        <p>Hybrid Retrieval Demo for MemGlyph</p>
+        <h1>GlyphCase Explorer</h1>
+        <p>Hybrid Retrieval + Dynamic Memory for MemGlyph</p>
       </header>
 
       <main className="app-main">

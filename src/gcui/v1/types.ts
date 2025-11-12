@@ -1,7 +1,7 @@
 /**
- * GlyphCapsule UI Specification v1.0 - TypeScript Types
+ * Glyph Case UI Specification v1.0 - TypeScript Types
  *
- * Type definitions for GCUI-compliant SQLAR capsules.
+ * Type definitions for GCUI-compliant SQLAR cases.
  */
 
 // ============================================================================
@@ -10,9 +10,9 @@
 
 export interface GcuiManifest {
   gcui: string;                 // GCUI version (e.g., "1.0")
-  capsule_kind: string;         // "sqlar"
+  capsule_kind: string;         // "sqlar" (field name for backwards compatibility)
   created?: string;             // ISO date
-  title?: string;               // Capsule title
+  title?: string;               // Case title
   [key: string]: string | undefined;
 }
 
