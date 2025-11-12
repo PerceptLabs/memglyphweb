@@ -21,6 +21,7 @@ import { GraphPanel, GraphControls, GraphStats } from '../graph';
 import { ProvenancePanel } from '../provenance';
 import { ReasoningOutput } from '../llm/LlmPanel';
 import { CapsuleLayout, TopBar, FilterPanel } from '../layouts';
+import { EnvelopeTimeline } from '../envelope';
 
 type ViewMode = 'search' | 'graph';
 
@@ -33,6 +34,7 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('search');
   const [selectedPageGid, setSelectedPageGid] = useState<string | null>(null);
   const [showProvenance, setShowProvenance] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   // Feature hooks
   const search = useSearch({ defaultMode: 'fts' });
@@ -192,6 +194,14 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
               >
                 {showProvenance ? '✓' : ''} Provenance
               </button>
+              {glyphCase.isDynamic && (
+                <button
+                  className={`btn-secondary btn-sm ${showTimeline ? 'active' : ''}`}
+                  onClick={() => setShowTimeline(!showTimeline)}
+                >
+                  {showTimeline ? '✓' : ''} Timeline
+                </button>
+              )}
             </>
           }
         />
@@ -425,19 +435,24 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
         </div>
       }
       rightSidebar={
-        showProvenance && (
-          <ProvenancePanel
-            checkpoints={provenance.checkpoints}
-            verificationResult={provenance.verificationResult}
-            loading={provenance.loading}
-            verifying={provenance.verifying}
-            error={provenance.error}
-            onVerify={handleVerifyPage}
-          />
-        )
+        <>
+          {showProvenance && (
+            <ProvenancePanel
+              checkpoints={provenance.checkpoints}
+              verificationResult={provenance.verificationResult}
+              loading={provenance.loading}
+              verifying={provenance.verifying}
+              error={provenance.error}
+              onVerify={handleVerifyPage}
+            />
+          )}
+          {showTimeline && glyphCase.isDynamic && (
+            <EnvelopeTimeline limit={100} />
+          )}
+        </>
       }
       showLeftSidebar={true}
-      showRightSidebar={showProvenance}
+      showRightSidebar={showProvenance || showTimeline}
     />
   );
 }
