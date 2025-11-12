@@ -2,12 +2,14 @@
  * LLM Feature Hook
  *
  * Encapsulates all LLM-related state and logic.
+ * Publishes events to GlyphStream when reasoning occurs.
  */
 
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { getLlmClient, QWEN_MODELS } from '../../db/llm-client';
 import type { LlmModelInfo, ReasoningResponse, LlmProgress } from '../../db/llm-types';
 import type { HybridResult } from '../../db/types';
+import { publishLlmPrompt, publishLlmOutput, publishLlmCitation } from '../../core/stream';
 
 export interface UseLlmOptions {
   autoReason?: boolean;  // Auto-trigger reasoning after search
@@ -127,11 +129,35 @@ export function useLlm(options: UseLlmOptions = {}) {
         score: r.scores.final,
       }));
 
+      // Publish prompt event to stream
+      publishLlmPrompt({
+        prompt: query,
+        context: snippets.map(s => s.text),
+        model: modelInfo.modelId
+      });
+
       const response = await llmClient.reason({
         question: query,
         snippets,
         maxTokens,
         temperature,
+      });
+
+      // Publish output event to stream
+      publishLlmOutput({
+        response: response.answer,
+        citations: response.usedSnippets.map(s => ({ gid: s.gid, pageNo: s.pageNo })),
+        model: modelInfo.modelId
+      });
+
+      // Publish citation events for each used snippet
+      response.usedSnippets.forEach(snippet => {
+        publishLlmCitation({
+          gid: snippet.gid,
+          pageNo: snippet.pageNo,
+          title: snippet.title || undefined,
+          snippet: snippet.text
+        });
       });
 
       setReasoning(response);

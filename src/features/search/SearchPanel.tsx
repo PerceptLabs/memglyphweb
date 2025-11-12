@@ -4,9 +4,13 @@
  * Provides UI for search functionality with mode selection.
  */
 
+import { useState } from 'preact/hooks';
 import DOMPurify from 'dompurify';
 import type { SearchMode } from './useSearch';
 import type { HybridResult } from '../../db/types';
+import { glyphCaseManager } from '../../db/glyphcase.manager';
+import { generateEnvelopeId } from '../../db/envelope.writer';
+import { publishFeedback } from '../../core/stream';
 
 export interface SearchModeToggleProps {
   mode: SearchMode;
@@ -111,13 +115,89 @@ export function SearchBar({ onSearch, loading, placeholder, searchHistory, onCle
   );
 }
 
+interface FeedbackButtonsProps {
+  resultGid: string;
+  retrievalId?: string;
+}
+
+function FeedbackButtons({ resultGid, retrievalId }: FeedbackButtonsProps) {
+  const [feedback, setFeedback] = useState<number | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleFeedback = async (rating: -1 | 0 | 1) => {
+    setSubmitting(true);
+    try {
+      // Publish to stream
+      publishFeedback({
+        retrievalId,
+        rating,
+        notes: undefined
+      });
+
+      // Log to envelope if in dynamic mode
+      if (glyphCaseManager.isDynamic()) {
+        const envelope = glyphCaseManager.getEnvelope();
+        const writer = envelope.getWriter();
+
+        if (writer) {
+          await writer.appendFeedback({
+            id: generateEnvelopeId('fb'),
+            retrieval_id: retrievalId,
+            rating,
+            notes: undefined
+          });
+        }
+      }
+
+      setFeedback(rating);
+    } catch (err) {
+      console.error('[Feedback] Failed to submit feedback:', err);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!glyphCaseManager.isDynamic()) {
+    // Only show feedback buttons in dynamic mode
+    return null;
+  }
+
+  return (
+    <div className="result-feedback">
+      <button
+        className={`feedback-btn ${feedback === 1 ? 'feedback-btn-active-positive' : ''}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          handleFeedback(1);
+        }}
+        disabled={submitting || feedback !== null}
+        title="Helpful result"
+      >
+        👍
+      </button>
+      <button
+        className={`feedback-btn ${feedback === -1 ? 'feedback-btn-active-negative' : ''}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          handleFeedback(-1);
+        }}
+        disabled={submitting || feedback !== null}
+        title="Not helpful"
+      >
+        👎
+      </button>
+    </div>
+  );
+}
+
 export interface SearchResultsProps {
   results: HybridResult[];
   query: string;
   onResultClick?: (gid: string) => void;
+  retrievalId?: string;
 }
 
-export function SearchResults({ results, query, onResultClick }: SearchResultsProps) {
+export function SearchResults({ results, query, onResultClick, retrievalId }: SearchResultsProps) {
   return (
     <div className="search-results">
       <p className="results-header">
@@ -133,6 +213,7 @@ export function SearchResults({ results, query, onResultClick }: SearchResultsPr
           <div className="result-header">
             <span className="result-page">Page {result.pageNo}</span>
             <span className="result-score">Score: {result.scores.final.toFixed(3)}</span>
+            <FeedbackButtons resultGid={result.gid} retrievalId={retrievalId} />
           </div>
           <h4 className="result-title">{result.title}</h4>
           {result.snippet && (

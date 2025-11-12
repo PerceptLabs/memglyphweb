@@ -12,6 +12,8 @@ import { useGraph } from '../graph';
 import { useProvenance } from '../provenance';
 import { useLlm } from '../llm';
 import { useKeyboardShortcuts } from '../shortcuts';
+import { useGlyphCase } from './useGlyphCase';
+import { ModalityBadge } from './ModalityBadge';
 import { SearchPanel } from '../search/SearchPanel';
 import { EntityPanel } from '../entities/EntityPanel';
 import { PagePreviewPanel } from '../page';
@@ -38,6 +40,7 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
   const graph = useGraph({ maxHops: 2, limit: 50 });
   const provenance = useProvenance({ autoLoadCheckpoints: true });
   const llm = useLlm({ autoReason: false });
+  const glyphCase = useGlyphCase();
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -148,6 +151,33 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                 <span>{capsuleInfo.entityCount} entities</span>
                 <span>{capsuleInfo.edgeCount} edges</span>
               </div>
+              <ModalityBadge
+                modality={glyphCase.modality}
+                envelopeStats={glyphCase.envelopeStats}
+                onEnableDynamic={glyphCase.enableDynamicMode}
+                onExportEnvelope={async () => {
+                  const blob = await glyphCase.exportEnvelope();
+                  if (blob) {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `envelope_${Date.now()}.db`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }
+                }}
+                onClearEnvelope={glyphCase.clearEnvelope}
+                onVerifyEnvelope={async () => {
+                  const result = await glyphCase.verifyEnvelope();
+                  if (result) {
+                    if (result.valid) {
+                      alert('✅ Envelope integrity verified!\n\nThe hash chain is intact.');
+                    } else {
+                      alert(`❌ Envelope integrity check failed:\n\n${result.errors.join('\n')}`);
+                    }
+                  }
+                }}
+              />
               <button
                 className={`btn-secondary btn-sm ${llm.enabled ? 'active' : ''}`}
                 onClick={llm.toggle}

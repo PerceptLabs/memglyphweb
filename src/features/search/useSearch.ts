@@ -2,11 +2,15 @@
  * Search Feature Hook
  *
  * Encapsulates search state and logic for FTS, Hybrid, and Graph modes.
+ * Publishes events to GlyphStream and logs to Envelope when in dynamic mode.
  */
 
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { getDbClient } from '../../db/client';
 import type { HybridResult, FtsResult } from '../../db/types';
+import { publishRetrievalQuery, publishRetrievalResult } from '../../core/stream';
+import { glyphCaseManager } from '../../db/glyphcase.manager';
+import { generateEnvelopeId } from '../../db/envelope.writer';
 
 export type SearchMode = 'fts' | 'hybrid' | 'graph';
 
@@ -120,8 +124,18 @@ export function useSearch(options: UseSearchOptions = {}) {
     // Add to history
     addToHistory(query);
 
+    const startTime = performance.now();
+
     try {
       const dbClient = getDbClient();
+
+      // Publish query event to stream
+      publishRetrievalQuery({
+        query,
+        type: mode,
+        limit: maxResults
+      });
+
       let searchResults: HybridResult[] = [];
 
       switch (mode) {
@@ -141,8 +155,27 @@ export function useSearch(options: UseSearchOptions = {}) {
           throw new Error(`Unknown search mode: ${mode}`);
       }
 
+      const executionTime = performance.now() - startTime;
+
+      // Publish result event to stream
+      publishRetrievalResult({
+        query,
+        type: mode,
+        results: searchResults.map(r => ({
+          gid: r.gid,
+          score: r.scores.final,
+          snippet: r.snippet || undefined
+        })),
+        executionTime
+      });
+
+      // Log to envelope if in dynamic mode
+      if (glyphCaseManager.isDynamic()) {
+        await logToEnvelope(query, mode, searchResults);
+      }
+
       setResults(searchResults);
-      console.log(`[Search] ${mode} mode: ${searchResults.length} results`);
+      console.log(`[Search] ${mode} mode: ${searchResults.length} results in ${executionTime.toFixed(0)}ms`);
 
       return searchResults;
     } catch (err) {
@@ -239,6 +272,47 @@ export function useSearch(options: UseSearchOptions = {}) {
 // ============================================================================
 // Internal Search Implementations
 // ============================================================================
+
+/**
+ * Log retrieval to envelope (if dynamic mode)
+ */
+async function logToEnvelope(
+  query: string,
+  mode: SearchMode,
+  results: HybridResult[]
+): Promise<void> {
+  try {
+    const envelope = glyphCaseManager.getEnvelope();
+    if (!envelope.isOpen()) {
+      // Envelope not open yet - this shouldn't happen but handle gracefully
+      console.warn('[Search] Envelope not open, skipping log');
+      return;
+    }
+
+    const writer = envelope.getWriter();
+    if (!writer) {
+      console.warn('[Search] No envelope writer available');
+      return;
+    }
+
+    await writer.appendRetrieval({
+      id: generateEnvelopeId('ret'),
+      query_text: query,
+      query_type: mode,
+      top_docs: results.slice(0, 10).map(r => ({
+        gid: r.gid,
+        score: r.scores.final,
+        snippet: r.snippet || undefined
+      })),
+      hit_count: results.length
+    });
+
+    console.log(`[Search] Logged retrieval to envelope: ${results.length} results`);
+  } catch (err) {
+    console.error('[Search] Failed to log to envelope:', err);
+    // Don't throw - envelope logging should not break search
+  }
+}
 
 /**
  * FTS-only search
