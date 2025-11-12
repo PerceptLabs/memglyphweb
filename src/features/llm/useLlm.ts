@@ -27,6 +27,10 @@ export function useLlm(options: UseLlmOptions = {}) {
 
   const startTimeRef = useRef<number>(0);
   const timerRef = useRef<number | null>(null);
+  const lastReasonTime = useRef<number>(0);
+
+  // Rate limiting constants
+  const MIN_REASON_INTERVAL = 5000; // 5 seconds between queries
 
   /**
    * Update elapsed time while loading
@@ -114,6 +118,19 @@ export function useLlm(options: UseLlmOptions = {}) {
       return;
     }
 
+    // Rate limiting check
+    const now = Date.now();
+    const timeSinceLastReason = now - lastReasonTime.current;
+
+    if (timeSinceLastReason < MIN_REASON_INTERVAL) {
+      const waitTime = Math.ceil((MIN_REASON_INTERVAL - timeSinceLastReason) / 1000);
+      const errorMsg = `Please wait ${waitTime}s before making another query (rate limit: 1 query per 5 seconds)`;
+      setError(errorMsg);
+      console.warn('[LLM] Rate limit hit:', errorMsg);
+      return;
+    }
+
+    lastReasonTime.current = now;
     setLoading(true);
     setError(null);
 

@@ -298,7 +298,17 @@ async function unloadModel(): Promise<LlmWorkerResponse> {
       await wllama.exit();
       wllama = null;
       modelInfo.loaded = false;
-      console.log('[LLM Worker] Model unloaded');
+
+      // Clear OPFS cache to free memory
+      try {
+        const root = await navigator.storage.getDirectory();
+        const cacheDir = await root.getDirectoryHandle(MODEL_CACHE_DIR, { create: false });
+        await root.removeEntry(MODEL_CACHE_DIR, { recursive: true });
+        console.log('[LLM Worker] Model unloaded and OPFS cache cleared');
+      } catch (e) {
+        // Cache directory might not exist or already cleared
+        console.log('[LLM Worker] Model unloaded (cache already clear)');
+      }
     }
     return { ok: true, data: null };
   } catch (error) {

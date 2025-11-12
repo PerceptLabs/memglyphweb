@@ -28,6 +28,7 @@ import {
   listOpfsFiles,
   isOpfsSupported,
 } from './opfs';
+import { VectorIndex, type VectorEntry } from './vector-index';
 const REQUIRED_TABLES = [
   'sqlar',
   'meta_index',
@@ -50,6 +51,7 @@ const MAX_FTS_RESULTS = 1000; // Maximum FTS search results
 let db: any = null;
 let sqlite3: any = null;
 let currentCapsuleInfo: CapsuleInfo | null = null;
+let vectorIndex: VectorIndex | null = null;
 
 // Initialize SQLite WASM
 async function initSqlite() {
@@ -85,7 +87,7 @@ function validateSchema(): { valid: boolean; missing: string[] } {
 }
 
 // Get capsule metadata
-function getCapsuleInfo(fileName: string, fileSize: number, opfsPath?: string): CapsuleInfo {
+async function getCapsuleInfo(fileName: string, fileSize: number, opfsPath?: string): Promise<CapsuleInfo> {
   if (!db) throw new Error('No database open');
 
   // Get doc_id from first page
@@ -161,7 +163,7 @@ function getCapsuleInfo(fileName: string, fileSize: number, opfsPath?: string): 
     stmt.finalize();
   }
 
-  return {
+  const capsuleInfo = {
     fileName,
     fileSize,
     docId,
@@ -173,6 +175,72 @@ function getCapsuleInfo(fileName: string, fileSize: number, opfsPath?: string): 
     vectorDim,
     opfsPath,
   };
+
+  // Build vector index if capsule has vectors
+  if (hasVectors) {
+    await buildVectorIndex();
+  }
+
+  return capsuleInfo;
+}
+
+// Build vector index from leann_vec table
+async function buildVectorIndex(): Promise<void> {
+  if (!db || !currentCapsuleInfo?.hasVectors) return;
+
+  try {
+    const startTime = performance.now();
+    console.log('[Worker] Building vector index...');
+
+    // Clear existing index
+    if (vectorIndex) {
+      vectorIndex.clear();
+    }
+
+    // Create new index
+    vectorIndex = new VectorIndex(100); // 100 clusters
+
+    // Load all vectors from leann_vec
+    const entries: VectorEntry[] = [];
+    const model = currentCapsuleInfo.vectorModel || 'gte-small-384';
+
+    const stmt = db.prepare(`
+      SELECT lv.gid, lv.embedding, m.page_no, m.title
+      FROM leann_vec lv
+      JOIN meta_index m ON m.gid = lv.gid
+      WHERE lv.model_id = ?
+      LIMIT 10000
+    `);
+
+    try {
+      stmt.bind([model]);
+
+      while (stmt.step()) {
+        const row = stmt.get([]);
+        const vector = unpackVector(row[1]);
+        entries.push({
+          gid: row[0],
+          vector,
+          metadata: {
+            pageNo: row[2],
+            title: row[3]
+          }
+        });
+      }
+    } finally {
+      stmt.finalize();
+    }
+
+    // Build index
+    await vectorIndex.build(entries);
+
+    const buildTime = performance.now() - startTime;
+    const stats = vectorIndex.getStats();
+    console.log(`[Worker] Vector index built in ${buildTime.toFixed(1)}ms:`, stats);
+  } catch (error) {
+    console.error('[Worker] Failed to build vector index:', error);
+    vectorIndex = null;
+  }
 }
 
 // Open capsule from File
@@ -213,7 +281,7 @@ async function openFromFile(file: File): Promise<RpcResponse<CapsuleInfo>> {
     }
 
     // Get metadata
-    const info = getCapsuleInfo(file.name, file.size);
+    const info = await getCapsuleInfo(file.name, file.size);
     currentCapsuleInfo = info;
 
     console.log('[Worker] Capsule opened:', info);
@@ -286,7 +354,7 @@ async function openFromOpfs(path: string): Promise<RpcResponse<CapsuleInfo>> {
     }
 
     // Get metadata (include OPFS path)
-    const info = getCapsuleInfo(path, bytes.length, path);
+    const info = await getCapsuleInfo(path, bytes.length, path);
     currentCapsuleInfo = info;
 
     console.log('[Worker] Capsule opened from OPFS:', info);
@@ -372,6 +440,13 @@ function closeCapsule(): RpcResponse<void> {
     db.close();
     db = null;
     currentCapsuleInfo = null;
+
+    // Clear vector index
+    if (vectorIndex) {
+      vectorIndex.clear();
+      vectorIndex = null;
+    }
+
     return { ok: true, data: undefined };
   }
   return { ok: false, error: 'No database open' };
@@ -442,6 +517,26 @@ function searchVector(queryVector: Float32Array, limit: number): RpcResponse<Vec
   // Clamp limit to prevent resource exhaustion
   const clampedLimit = Math.min(limit, MAX_QUERY_RESULTS);
 
+  const startTime = performance.now();
+
+  // Use vector index if available (fast ANN search)
+  if (vectorIndex) {
+    const indexResults = vectorIndex.search(queryVector, clampedLimit);
+    const results: VectorResult[] = indexResults.map(r => ({
+      gid: r.gid,
+      pageNo: r.metadata!.pageNo,
+      title: r.metadata!.title,
+      similarity: r.similarity
+    }));
+
+    const searchTime = performance.now() - startTime;
+    console.log(`[Worker] Vector search (indexed): ${searchTime.toFixed(2)}ms, ${results.length} results`);
+
+    return { ok: true, data: results };
+  }
+
+  // Fallback to brute force if no index
+  console.log('[Worker] Vector search (brute force fallback)');
   const results: VectorResult[] = [];
   const model = currentCapsuleInfo.vectorModel || 'gte-small-384';
 

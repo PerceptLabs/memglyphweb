@@ -22,6 +22,7 @@ import { ProvenancePanel } from '../provenance';
 import { ReasoningOutput } from '../llm/LlmPanel';
 import { CapsuleLayout, TopBar, FilterPanel } from '../layouts';
 import { EnvelopeTimeline } from '../envelope';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 
 type ViewMode = 'search' | 'graph';
 
@@ -207,38 +208,40 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
         />
       }
       leftSidebar={
-        <FilterPanel
-          title="Entity Filters"
-          onClear={handleClearEntityFilter}
-          hasActiveFilters={hasActiveEntityFilter}
-        >
-          {hasActiveEntityFilter && (
-            <div className="active-filters">
-              <p className="filter-label">Active Filter:</p>
-              {search.entityFilter.entityType && (
-                <span className="filter-tag">
-                  Type: {search.entityFilter.entityType}
-                </span>
-              )}
-              {search.entityFilter.entityValue && (
-                <span className="filter-tag">
-                  Value: {search.entityFilter.entityValue}
-                </span>
-              )}
-            </div>
-          )}
+        <ErrorBoundary name="EntityPanel">
+          <FilterPanel
+            title="Entity Filters"
+            onClear={handleClearEntityFilter}
+            hasActiveFilters={hasActiveEntityFilter}
+          >
+            {hasActiveEntityFilter && (
+              <div className="active-filters">
+                <p className="filter-label">Active Filter:</p>
+                {search.entityFilter.entityType && (
+                  <span className="filter-tag">
+                    Type: {search.entityFilter.entityType}
+                  </span>
+                )}
+                {search.entityFilter.entityValue && (
+                  <span className="filter-tag">
+                    Value: {search.entityFilter.entityValue}
+                  </span>
+                )}
+              </div>
+            )}
 
-          <EntityPanel
-            entities={entities.entities}
-            types={entities.types}
-            selectedType={entities.selectedType}
-            totalCount={entities.totalCount}
-            onSelectType={entities.selectType}
-            getTypeCount={entities.getTypeCount}
-            show={true}
-            maxDisplay={20}
-          />
-        </FilterPanel>
+            <EntityPanel
+              entities={entities.entities}
+              types={entities.types}
+              selectedType={entities.selectedType}
+              totalCount={entities.totalCount}
+              onSelectType={entities.selectType}
+              getTypeCount={entities.getTypeCount}
+              show={true}
+              maxDisplay={20}
+            />
+          </FilterPanel>
+        </ErrorBoundary>
       }
       centerPanel={
         <div className="capsule-center">
@@ -261,24 +264,27 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
           {/* Search View */}
           {viewMode === 'search' && (
             <>
-              <SearchPanel
-                mode={search.mode}
-                results={search.results}
-                lastQuery={search.lastQuery}
-                loading={search.loading}
-                onSearch={search.search}
-                onModeChange={search.changeMode}
-                onResultClick={handleResultClick}
-                showModeToggle={true}
-                placeholder="Search the capsule..."
-                searchHint='Try: "vector search", "LEANN", "SQLite", or "hybrid retrieval"'
-                searchHistory={search.searchHistory}
-                onClearHistory={search.clearHistory}
-              />
+              <ErrorBoundary name="SearchPanel">
+                <SearchPanel
+                  mode={search.mode}
+                  results={search.results}
+                  lastQuery={search.lastQuery}
+                  loading={search.loading}
+                  onSearch={search.search}
+                  onModeChange={search.changeMode}
+                  onResultClick={handleResultClick}
+                  showModeToggle={true}
+                  placeholder="Search the capsule..."
+                  searchHint='Try: "vector search", "LEANN", "SQLite", or "hybrid retrieval"'
+                  searchHistory={search.searchHistory}
+                  onClearHistory={search.clearHistory}
+                />
+              </ErrorBoundary>
 
               {/* LLM Reasoning Output */}
-              {llm.enabled && search.results && search.results.length > 0 && (
-                <div className="llm-section">
+              <ErrorBoundary name="LLM">
+                {llm.enabled && search.results && search.results.length > 0 && (
+                  <div className="llm-section">
                   {/* Temperature Control */}
                   <div className="llm-temperature-control">
                     <label htmlFor="temperature-slider" className="temperature-label">
@@ -355,99 +361,108 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                 </div>
               )}
 
-              {/* Show message when LLM is enabled but no results */}
-              {llm.enabled && (!search.results || search.results.length === 0) && search.lastQuery && (
-                <div className="llm-no-results">
-                  <p>🤖 LLM needs search results to reason. Try searching first!</p>
-                </div>
-              )}
+                {/* Show message when LLM is enabled but no results */}
+                {llm.enabled && (!search.results || search.results.length === 0) && search.lastQuery && (
+                  <div className="llm-no-results">
+                    <p>🤖 LLM needs search results to reason. Try searching first!</p>
+                  </div>
+                )}
+              </ErrorBoundary>
             </>
           )}
 
           {/* Graph View */}
           {viewMode === 'graph' && (
-            <div className="graph-view-container">
-              {!graph.graphData && (
-                <div className="graph-view-empty">
-                  <p>Select a search result to explore its graph connections</p>
-                  <p className="hint">Or switch to Search tab to find pages</p>
-                </div>
-              )}
+            <ErrorBoundary name="GraphPanel">
+              <div className="graph-view-container">
+                {!graph.graphData && (
+                  <div className="graph-view-empty">
+                    <p>Select a search result to explore its graph connections</p>
+                    <p className="hint">Or switch to Search tab to find pages</p>
+                  </div>
+                )}
 
-              {graph.graphData && (
-                <>
-                  <GraphStats
-                    nodeCount={graph.nodeCount}
-                    edgeCount={graph.edgeCount}
-                    predicateCount={graph.predicates.length}
-                    seedNode={graph.seedGid || undefined}
-                  />
+                {graph.graphData && (
+                  <>
+                    <GraphStats
+                      nodeCount={graph.nodeCount}
+                      edgeCount={graph.edgeCount}
+                      predicateCount={graph.predicates.length}
+                      seedNode={graph.seedGid || undefined}
+                    />
 
-                  <GraphControls
-                    predicates={graph.predicates}
-                    selectedPredicate={graph.predicate}
-                    onPredicateChange={graph.filterByPredicate}
-                    onReset={graph.clear}
-                  />
+                    <GraphControls
+                      predicates={graph.predicates}
+                      selectedPredicate={graph.predicate}
+                      onPredicateChange={graph.filterByPredicate}
+                      onReset={graph.clear}
+                    />
 
-                  <GraphPanel
-                    nodes={graph.graphData.nodes}
-                    edges={graph.graphData.edges}
-                    seedGid={graph.seedGid || undefined}
+                    <GraphPanel
+                      nodes={graph.graphData.nodes}
+                      edges={graph.graphData.edges}
+                      seedGid={graph.seedGid || undefined}
                     onNodeClick={handleGraphNodeClick}
                     loading={graph.loading}
                     error={graph.error}
                   />
                 </>
               )}
-            </div>
+              </div>
+            </ErrorBoundary>
           )}
 
           {/* Page Preview (shown in both views) */}
           {selectedPageGid && (
-            <div className="page-preview-section">
-              <div className="page-preview-header-actions">
-                <h3>Page Preview</h3>
-                <div className="page-preview-actions">
-                  {viewMode === 'search' && (
+            <ErrorBoundary name="PagePreview">
+              <div className="page-preview-section">
+                <div className="page-preview-header-actions">
+                  <h3>Page Preview</h3>
+                  <div className="page-preview-actions">
+                    {viewMode === 'search' && (
+                      <button
+                        className="btn-secondary btn-sm"
+                        onClick={() => handleExploreGraph(selectedPageGid)}
+                      >
+                        Explore Graph
+                      </button>
+                    )}
                     <button
-                      className="btn-secondary btn-sm"
-                      onClick={() => handleExploreGraph(selectedPageGid)}
+                      className="btn-primary btn-sm"
+                      onClick={handleVerifyPage}
+                      disabled={provenance.verifying}
                     >
-                      Explore Graph
+                      {provenance.verifying ? 'Verifying...' : 'Verify Page'}
                     </button>
-                  )}
-                  <button
-                    className="btn-primary btn-sm"
-                    onClick={handleVerifyPage}
-                    disabled={provenance.verifying}
-                  >
-                    {provenance.verifying ? 'Verifying...' : 'Verify Page'}
-                  </button>
+                  </div>
                 </div>
+                <PagePreviewPanel
+                  selectedGid={selectedPageGid}
+                  onClose={() => setSelectedPageGid(null)}
+                />
               </div>
-              <PagePreviewPanel
-                selectedGid={selectedPageGid}
-                onClose={() => setSelectedPageGid(null)}
-              />
-            </div>
+            </ErrorBoundary>
           )}
         </div>
       }
       rightSidebar={
         <>
           {showProvenance && (
-            <ProvenancePanel
-              checkpoints={provenance.checkpoints}
-              verificationResult={provenance.verificationResult}
-              loading={provenance.loading}
-              verifying={provenance.verifying}
-              error={provenance.error}
-              onVerify={handleVerifyPage}
-            />
+            <ErrorBoundary name="ProvenancePanel">
+              <ProvenancePanel
+                checkpoints={provenance.checkpoints}
+                verificationResult={provenance.verificationResult}
+                loading={provenance.loading}
+                verifying={provenance.verifying}
+                error={provenance.error}
+                onVerify={handleVerifyPage}
+              />
+            </ErrorBoundary>
           )}
           {showTimeline && glyphCase.isDynamic && (
-            <EnvelopeTimeline limit={100} />
+            <ErrorBoundary name="EnvelopeTimeline">
+              <EnvelopeTimeline limit={100} />
+            </ErrorBoundary>
           )}
         </>
       }
