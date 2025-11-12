@@ -17,6 +17,7 @@ let modelInfo: LlmModelInfo = {
   modelId: 'qwen3-0.6b',
   loaded: false
 };
+let abortController: AbortController | null = null;
 
 // OPFS cache for model files
 const MODEL_CACHE_DIR = 'llm-models';
@@ -229,17 +230,20 @@ function extractCitedGids(answer: string, availableGids: string[]): string[] {
   return Array.from(cited);
 }
 
-// Perform reasoning
-async function reason(request: ReasoningRequest): Promise<LlmWorkerResponse> {
+// Perform reasoning with streaming
+async function reason(request: ReasoningRequest, messageId: number): Promise<LlmWorkerResponse> {
   try {
     if (!wllama || !modelInfo.loaded) {
       return { ok: false, error: 'Model not loaded' };
     }
 
-    console.log('[LLM Worker] Reasoning over', request.snippets.length, 'snippets');
+    console.log('[LLM Worker] Reasoning over', request.snippets.length, 'snippets (streaming)');
 
     const prompt = buildPrompt(request);
     const startTime = performance.now();
+
+    // Create abort controller for this reasoning session
+    abortController = new AbortController();
 
     // Get stop token IDs for thinking tags (to prevent Qwen3 thinking mode)
     const stopTokens: number[] = [];
@@ -252,20 +256,60 @@ async function reason(request: ReasoningRequest): Promise<LlmWorkerResponse> {
       console.warn('[LLM Worker] Could not lookup thinking tokens:', e);
     }
 
-    // Generate response
-    const response = await wllama.createCompletion(prompt, {
-      nPredict: request.maxTokens || 256,
-      sampling: {
-        temp: request.temperature || 0.7,
-        top_p: 0.9,
-      },
-      stopTokens: stopTokens.length > 0 ? stopTokens : undefined
-    });
+    let fullAnswer = '';
+    let tokenCount = 0;
+
+    try {
+      // Generate response with streaming
+      const options = {
+        nPredict: request.maxTokens || 256,
+        sampling: {
+          temp: request.temperature || 0.7,
+          top_p: 0.9,
+        },
+        stopTokens: stopTokens.length > 0 ? stopTokens : undefined,
+        onNewToken: (token: number, piece: string, currentText: string) => {
+          // Check if aborted
+          if (abortController?.signal.aborted) {
+            throw new Error('Reasoning aborted by user');
+          }
+
+          // Send streaming token event
+          self.postMessage({
+            type: 'STREAM_TOKEN',
+            id: messageId,
+            token: String(token),
+            piece: piece
+          });
+
+          fullAnswer = currentText;
+          tokenCount++;
+        }
+      };
+
+      await wllama.createCompletion(prompt, options);
+
+      // Send completion event
+      self.postMessage({
+        type: 'STREAM_COMPLETE',
+        id: messageId
+      });
+
+    } catch (error) {
+      // Check if it was an abort
+      if (abortController?.signal.aborted || String(error).includes('abort')) {
+        console.log('[LLM Worker] Reasoning aborted');
+        return { ok: false, error: 'Reasoning aborted by user' };
+      }
+      throw error;
+    } finally {
+      abortController = null;
+    }
 
     const inferenceTimeMs = performance.now() - startTime;
 
     // Extract answer
-    const answer = response.trim();
+    const answer = fullAnswer.trim();
 
     // Extract cited GIDs
     const availableGids = request.snippets.map(s => s.gid);
@@ -274,7 +318,7 @@ async function reason(request: ReasoningRequest): Promise<LlmWorkerResponse> {
     const result: ReasoningResponse = {
       answer,
       usedSnippets,
-      tokensGenerated: response.split(/\s+/).length, // Rough estimate
+      tokensGenerated: tokenCount,
       inferenceTimeMs
     };
 
@@ -287,8 +331,26 @@ async function reason(request: ReasoningRequest): Promise<LlmWorkerResponse> {
     return { ok: true, data: result };
   } catch (error) {
     console.error('[LLM Worker] Reasoning failed:', error);
+
+    // Send error event
+    self.postMessage({
+      type: 'STREAM_ERROR',
+      id: messageId,
+      error: String(error)
+    });
+
     return { ok: false, error: String(error) };
   }
+}
+
+// Abort ongoing reasoning
+function abortReasoning(): LlmWorkerResponse {
+  if (abortController) {
+    console.log('[LLM Worker] Aborting reasoning...');
+    abortController.abort();
+    return { ok: true, data: null };
+  }
+  return { ok: false, error: 'No reasoning in progress' };
 }
 
 // Unload model
@@ -322,19 +384,22 @@ function getStatus(): LlmWorkerResponse {
 }
 
 // Handle request
-async function handleRequest(request: LlmWorkerRequest): Promise<LlmWorkerResponse> {
+async function handleRequest(request: LlmWorkerRequest, messageId: number): Promise<LlmWorkerResponse> {
   switch (request.type) {
     case 'LOAD_MODEL':
       return await loadModel(request.modelUrl);
 
     case 'REASON':
-      return await reason(request.request);
+      return await reason(request.request, messageId);
 
     case 'UNLOAD_MODEL':
       return await unloadModel();
 
     case 'GET_STATUS':
       return getStatus();
+
+    case 'ABORT_REASONING':
+      return abortReasoning();
 
     default:
       return { ok: false, error: `Unknown request type: ${(request as any).type}` };
@@ -345,7 +410,7 @@ async function handleRequest(request: LlmWorkerRequest): Promise<LlmWorkerRespon
 self.onmessage = async (event: MessageEvent<LlmWorkerMessage>) => {
   const { id, request } = event.data;
 
-  const response = await handleRequest(request);
+  const response = await handleRequest(request, id);
 
   const reply: LlmWorkerReply = { id, response };
   self.postMessage(reply);

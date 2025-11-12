@@ -17,6 +17,9 @@ export class LlmClient {
     reject: (error: Error) => void;
   }>();
   private progressCallback: ((progress: LlmProgress) => void) | null = null;
+  private streamTokenCallback: ((token: string, piece: string) => void) | null = null;
+  private streamCompleteCallback: (() => void) | null = null;
+  private streamErrorCallback: ((error: string) => void) | null = null;
 
   constructor() {
     this.initWorker();
@@ -43,6 +46,30 @@ export class LlmClient {
       if ('type' in data && data.type === 'PROGRESS') {
         if (this.progressCallback) {
           this.progressCallback(data.data as LlmProgress);
+        }
+        return;
+      }
+
+      // Handle streaming token events
+      if ('type' in data && data.type === 'STREAM_TOKEN') {
+        if (this.streamTokenCallback) {
+          this.streamTokenCallback(data.token, data.piece);
+        }
+        return;
+      }
+
+      // Handle streaming complete events
+      if ('type' in data && data.type === 'STREAM_COMPLETE') {
+        if (this.streamCompleteCallback) {
+          this.streamCompleteCallback();
+        }
+        return;
+      }
+
+      // Handle streaming error events
+      if ('type' in data && data.type === 'STREAM_ERROR') {
+        if (this.streamErrorCallback) {
+          this.streamErrorCallback(data.error);
         }
         return;
       }
@@ -97,6 +124,22 @@ export class LlmClient {
     this.progressCallback = callback;
   }
 
+  onStreamToken(callback: (token: string, piece: string) => void) {
+    this.streamTokenCallback = callback;
+  }
+
+  onStreamComplete(callback: () => void) {
+    this.streamCompleteCallback = callback;
+  }
+
+  onStreamError(callback: (error: string) => void) {
+    this.streamErrorCallback = callback;
+  }
+
+  async abortReasoning(): Promise<void> {
+    return this.sendRequest({ type: 'ABORT_REASONING' });
+  }
+
   // API Methods
 
   async loadModel(modelUrl: string): Promise<LlmModelInfo> {
@@ -132,6 +175,9 @@ export class LlmClient {
     }
     this.pending.clear();
     this.progressCallback = null;
+    this.streamTokenCallback = null;
+    this.streamCompleteCallback = null;
+    this.streamErrorCallback = null;
   }
 }
 

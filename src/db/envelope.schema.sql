@@ -158,3 +158,30 @@ SELECT
   (SELECT COUNT(*) FROM _env_chain) as chain_length,
   (SELECT MIN(ts) FROM env_retrieval_log) as first_activity,
   (SELECT MAX(ts) FROM env_retrieval_log) as last_activity;
+
+-- Search analytics view
+CREATE VIEW IF NOT EXISTS v_search_analytics AS
+SELECT
+  COUNT(*) as total_queries,
+  COUNT(CASE WHEN hit_count = 0 THEN 1 END) as zero_result_queries,
+  COUNT(CASE WHEN hit_count > 0 THEN 1 END) as successful_queries,
+  ROUND(COUNT(CASE WHEN hit_count = 0 THEN 1 END) * 100.0 / COUNT(*), 2) as zero_result_rate,
+  AVG(hit_count) as avg_hit_count,
+  COUNT(DISTINCT query_text) as unique_queries,
+  query_type,
+  date(ts) as query_date
+FROM env_retrieval_log
+GROUP BY query_type, query_date
+ORDER BY query_date DESC;
+
+-- Zero-result queries view (for improving search)
+CREATE VIEW IF NOT EXISTS v_zero_result_queries AS
+SELECT
+  query_text,
+  query_type,
+  ts,
+  COUNT(*) as attempt_count
+FROM env_retrieval_log
+WHERE hit_count = 0
+GROUP BY query_text, query_type
+ORDER BY attempt_count DESC, ts DESC;

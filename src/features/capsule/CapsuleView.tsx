@@ -324,6 +324,25 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                     </div>
                   )}
 
+                  {/* Streaming LLM Output */}
+                  {llm.isStreaming && llm.streamingText && (
+                    <div className="streaming-output">
+                      <div className="streaming-header">
+                        <span className="streaming-indicator">🤖 Streaming...</span>
+                        <button
+                          className="btn-secondary btn-sm abort-btn"
+                          onClick={() => llm.abortReasoning()}
+                          title="Stop reasoning"
+                        >
+                          ⏹️ Stop
+                        </button>
+                      </div>
+                      <div className="streaming-text">
+                        {llm.streamingText}<span className="streaming-cursor">▊</span>
+                      </div>
+                    </div>
+                  )}
+
                   {llm.reasoning && (
                     <ReasoningOutput
                       reasoning={llm.reasoning}
@@ -332,7 +351,7 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                     />
                   )}
 
-                  {llm.loading && !llm.reasoning && !llm.progress && (
+                  {llm.loading && !llm.reasoning && !llm.progress && !llm.isStreaming && (
                     <div className="reasoning-loading">
                       <div className="spinner"></div>
                       <p>LLM is reasoning over search results...</p>

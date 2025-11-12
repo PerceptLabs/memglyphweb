@@ -34,7 +34,8 @@ export type LlmWorkerRequest =
   | { type: 'LOAD_MODEL'; modelUrl: string }
   | { type: 'REASON'; request: ReasoningRequest }
   | { type: 'UNLOAD_MODEL' }
-  | { type: 'GET_STATUS' };
+  | { type: 'GET_STATUS' }
+  | { type: 'ABORT_REASONING' };
 
 export type LlmWorkerResponse =
   | { ok: true; data: LlmModelInfo | ReasoningResponse | null }
@@ -48,6 +49,27 @@ export interface LlmWorkerMessage {
 export interface LlmWorkerReply {
   id: number;
   response: LlmWorkerResponse;
+}
+
+// Streaming token event
+export interface StreamTokenEvent {
+  type: 'STREAM_TOKEN';
+  id: number;
+  token: string;
+  piece: string;
+}
+
+// Streaming complete event
+export interface StreamCompleteEvent {
+  type: 'STREAM_COMPLETE';
+  id: number;
+}
+
+// Streaming error event
+export interface StreamErrorEvent {
+  type: 'STREAM_ERROR';
+  id: number;
+  error: string;
 }
 
 // Progress events

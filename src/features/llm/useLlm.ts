@@ -25,6 +25,10 @@ export function useLlm(options: UseLlmOptions = {}) {
   const [elapsedTime, setElapsedTime] = useState<number>(0);
   const [temperature, setTemperature] = useState<number>(0.7); // Default 0.7
 
+  // Streaming state
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingText, setStreamingText] = useState<string>('');
+
   const startTimeRef = useRef<number>(0);
   const timerRef = useRef<number | null>(null);
   const lastReasonTime = useRef<number>(0);
@@ -76,6 +80,21 @@ export function useLlm(options: UseLlmOptions = {}) {
       // Set up progress callback
       llmClient.onProgress((prog) => {
         setProgress(prog);
+      });
+
+      // Set up streaming callbacks
+      llmClient.onStreamToken((token: string, piece: string) => {
+        setStreamingText(prev => prev + piece);
+      });
+
+      llmClient.onStreamComplete(() => {
+        setIsStreaming(false);
+      });
+
+      llmClient.onStreamError((err: string) => {
+        setError(err);
+        setIsStreaming(false);
+        setStreamingText('');
       });
 
       // Load Qwen 3 0.6B model
@@ -133,6 +152,8 @@ export function useLlm(options: UseLlmOptions = {}) {
     lastReasonTime.current = now;
     setLoading(true);
     setError(null);
+    setIsStreaming(true);
+    setStreamingText('');
 
     try {
       const llmClient = getLlmClient();
@@ -178,13 +199,32 @@ export function useLlm(options: UseLlmOptions = {}) {
       });
 
       setReasoning(response);
+      setIsStreaming(false);
       console.log('[LLM] Reasoning complete:', response);
     } catch (err) {
       const errorMsg = String(err);
       setError(errorMsg);
+      setIsStreaming(false);
+      setStreamingText('');
       console.error('[LLM] Reasoning failed:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /**
+   * Abort ongoing reasoning
+   */
+  const abortReasoning = async () => {
+    try {
+      const llmClient = getLlmClient();
+      await llmClient.abortReasoning();
+      setIsStreaming(false);
+      setStreamingText('');
+      setLoading(false);
+      console.log('[LLM] Reasoning aborted');
+    } catch (err) {
+      console.error('[LLM] Failed to abort reasoning:', err);
     }
   };
 
@@ -205,12 +245,15 @@ export function useLlm(options: UseLlmOptions = {}) {
     error,
     elapsedTime, // Elapsed time during inference (in seconds)
     temperature, // LLM temperature setting (0.0 - 1.0)
+    isStreaming, // Whether LLM is currently streaming tokens
+    streamingText, // Accumulated streaming text (live output)
 
     // Actions
     toggle,
     loadModel,
     reason,
     clearReasoning,
+    abortReasoning, // Stop ongoing reasoning
     setTemperature, // Update temperature setting
   };
 }
