@@ -1024,6 +1024,187 @@ function exportDatabase(): RpcResponse<Uint8Array> {
   }
 }
 
+/**
+ * Compute hash of capsule file for envelope identification
+ */
+async function computeCapsuleHash(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Check if a database file contains envelope tables (canonical .gcase+ format)
+ */
+function hasEnvelopeTables(fileBytes: Uint8Array): RpcResponse<boolean> {
+  const tempDb = new sqlite3.oo1.DB(':memory:');
+
+  try {
+    // Deserialize the file into memory
+    const rc = sqlite3.capi.sqlite3_deserialize(
+      tempDb.pointer,
+      'main',
+      fileBytes,
+      fileBytes.byteLength,
+      fileBytes.byteLength,
+      sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+      sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+    );
+
+    if (rc !== 0) {
+      return { ok: true, data: false };
+    }
+
+    // Check for envelope metadata table
+    const stmt = tempDb.prepare(`
+      SELECT COUNT(*)
+      FROM sqlite_master
+      WHERE type='table' AND name='_envelope_meta'
+    `);
+
+    try {
+      if (stmt.step()) {
+        const count = stmt.get([])[0];
+        return { ok: true, data: count > 0 };
+      }
+      return { ok: true, data: false };
+    } finally {
+      stmt.finalize();
+    }
+  } catch (err) {
+    console.warn('[Worker] Error checking for envelope tables:', err);
+    return { ok: true, data: false };
+  } finally {
+    tempDb.close();
+  }
+}
+
+/**
+ * Extract envelope tables from canonical .gcase+ file to OPFS sidecar
+ */
+async function extractEnvelope(file: File): Promise<RpcResponse<void>> {
+  try {
+    const gcaseId = await computeCapsuleHash(file);
+    const opfsPath = `/envelopes/${gcaseId}.db`;
+
+    console.log('[Worker] Extracting envelope from canonical .gcase+ file...');
+
+    // Read file bytes
+    const fileBytes = new Uint8Array(await file.arrayBuffer());
+
+    // Create OPFS directory for sidecar (OPFS is available in workers)
+    const opfsRoot = await navigator.storage.getDirectory();
+    const envelopesDir = await opfsRoot.getDirectoryHandle('envelopes', { create: true });
+
+    // Create new sidecar database
+    const sidecarDb = new sqlite3.oo1.OpfsDb(opfsPath, 'c');
+
+    // Load source file into temp in-memory DB
+    const sourceDb = new sqlite3.oo1.DB(':memory:');
+
+    try {
+      const rc = sqlite3.capi.sqlite3_deserialize(
+        sourceDb.pointer,
+        'main',
+        fileBytes,
+        fileBytes.byteLength,
+        fileBytes.byteLength,
+        sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+        sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+      );
+
+      if (rc !== 0) {
+        throw new Error(`Failed to deserialize source database: ${rc}`);
+      }
+
+      // ATTACH the new sidecar to the source DB
+      sourceDb.exec(`ATTACH DATABASE '${opfsPath}' AS sidecar`);
+
+      // Copy envelope tables
+      const envelopeTables = [
+        '_envelope_meta',
+        '_env_chain',
+        'env_retrieval_log',
+        'env_embeddings',
+        'env_feedback',
+        'env_context_summaries'
+      ];
+
+      for (const table of envelopeTables) {
+        // Get CREATE statement
+        const createStmt = sourceDb.prepare(`
+          SELECT sql FROM main.sqlite_master
+          WHERE type='table' AND name=?
+        `);
+
+        try {
+          createStmt.bind([table]);
+          if (createStmt.step()) {
+            const sql = createStmt.get([])[0];
+            if (sql) {
+              // Create table in sidecar
+              sidecarDb.exec(sql);
+
+              // Copy data
+              sourceDb.exec(`INSERT INTO sidecar.${table} SELECT * FROM main.${table}`);
+              console.log(`[Worker] Copied table: ${table}`);
+            }
+          }
+        } finally {
+          createStmt.finalize();
+        }
+      }
+
+      // Copy indexes
+      const indexStmt = sourceDb.prepare(`
+        SELECT sql FROM main.sqlite_master
+        WHERE type='index'
+          AND name LIKE 'env_%'
+          AND sql IS NOT NULL
+      `);
+
+      try {
+        while (indexStmt.step()) {
+          const sql = indexStmt.get([])[0];
+          if (sql) {
+            sidecarDb.exec(sql);
+          }
+        }
+      } finally {
+        indexStmt.finalize();
+      }
+
+      // Copy views
+      const viewStmt = sourceDb.prepare(`
+        SELECT sql FROM main.sqlite_master
+        WHERE type='view' AND name LIKE 'env_%'
+      `);
+
+      try {
+        while (viewStmt.step()) {
+          const sql = viewStmt.get([])[0];
+          if (sql) {
+            sidecarDb.exec(sql);
+          }
+        }
+      } finally {
+        viewStmt.finalize();
+      }
+
+      sourceDb.exec('DETACH DATABASE sidecar');
+      console.log('[Worker] Envelope extraction complete');
+
+      return { ok: true, data: undefined };
+    } finally {
+      sourceDb.close();
+      sidecarDb.close();
+    }
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
   try {
     switch (request.type) {
@@ -1082,6 +1263,12 @@ async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
 
       case 'EXPORT_DATABASE':
         return exportDatabase();
+
+      case 'HAS_ENVELOPE_TABLES':
+        return hasEnvelopeTables(request.fileBytes);
+
+      case 'EXTRACT_ENVELOPE':
+        return await extractEnvelope(request.file);
 
       case 'QUERY':
         return executeQuery(request.sql, request.params || []);

@@ -12,6 +12,7 @@ import './ModalityBadge.css';
 export interface ModalityBadgeProps {
   modality: Modality;
   envelopeStats?: EnvelopeStats | null;
+  envelopeExtracted?: boolean;
   onEnableDynamic?: () => Promise<void>;
   onSaveGlyphCase?: () => Promise<void>;
   onClearEnvelope?: () => Promise<void>;
@@ -21,6 +22,7 @@ export interface ModalityBadgeProps {
 export function ModalityBadge({
   modality,
   envelopeStats,
+  envelopeExtracted,
   onEnableDynamic,
   onSaveGlyphCase,
   onClearEnvelope,
@@ -150,6 +152,12 @@ export function ModalityBadge({
               <p className="modality-description">
                 This GlyphCase has an active Envelope for episodic memory.
               </p>
+
+              {envelopeExtracted && (
+                <p className="envelope-hint" style={{ marginBottom: '1rem', fontSize: '0.9em', color: '#6b7280' }}>
+                  ℹ️ Opened from canonical .gcase+ format (Core + Envelope in single file)
+                </p>
+              )}
 
               {envelopeStats && (
                 <div className="envelope-stats">

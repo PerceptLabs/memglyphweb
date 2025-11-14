@@ -26,6 +26,7 @@ import type { CapsuleInfo } from './rpc-contract';
 export interface GlyphCaseInfo extends CapsuleInfo {
   modality: Modality;
   envelopeStats?: EnvelopeStats;
+  envelopeExtracted?: boolean; // True if envelope was extracted from canonical .gcase+ file
 }
 
 /**
@@ -84,6 +85,18 @@ export class GlyphCaseManager {
   async openFromFile(file: File, requestDynamic?: boolean): Promise<GlyphCaseInfo> {
     this.currentFile = file;
 
+    // Check if file has envelope tables embedded (canonical .gcase+ format)
+    const fileBytes = new Uint8Array(await file.arrayBuffer());
+    const hasEnvelope = await this.dbClient.hasEnvelopeTables(fileBytes);
+
+    if (hasEnvelope) {
+      console.log('[GlyphCase] Detected canonical .gcase+ file with embedded envelope');
+
+      // Extract envelope tables to OPFS sidecar for runtime writes
+      await this.dbClient.extractEnvelope(file);
+      console.log('[GlyphCase] Envelope extracted to runtime sidecar');
+    }
+
     // Open Core database
     const coreInfo = await this.dbClient.openFromFile(file);
 
@@ -91,24 +104,28 @@ export class GlyphCaseManager {
     let modality: Modality;
     if (requestDynamic !== undefined) {
       modality = requestDynamic ? 'dynamic' : 'static';
+    } else if (hasEnvelope) {
+      // File has envelope, automatically use dynamic mode
+      modality = 'dynamic';
     } else {
       modality = await this.detectModality(file);
     }
 
     this.currentModality = modality;
 
-    // If dynamic, initialize envelope
+    // If dynamic, get envelope stats
     let envelopeStats: EnvelopeStats | undefined;
     if (modality === 'dynamic') {
-      // Get sqlite3 instance from worker (we'll need to add this to the API)
-      // For now, we'll handle envelope separately when needed
-      console.log('[GlyphCase] Dynamic mode - envelope will be initialized on first write');
+      // Envelope is now available in OPFS sidecar
+      envelopeStats = this.envelopeManager.getStats() || undefined;
+      console.log('[GlyphCase] Dynamic mode active with envelope sidecar');
     }
 
     this.currentInfo = {
       ...coreInfo,
       modality,
-      envelopeStats
+      envelopeStats,
+      envelopeExtracted: hasEnvelope
     };
 
     // Publish to stream

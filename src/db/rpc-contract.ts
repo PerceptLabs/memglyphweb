@@ -118,6 +118,16 @@ const ExportDatabaseRequest = z.object({
   type: z.literal('EXPORT_DATABASE'),
 });
 
+const HasEnvelopeTablesRequest = z.object({
+  type: z.literal('HAS_ENVELOPE_TABLES'),
+  fileBytes: z.instanceof(Uint8Array),
+});
+
+const ExtractEnvelopeRequest = z.object({
+  type: z.literal('EXTRACT_ENVELOPE'),
+  file: z.instanceof(File),
+});
+
 // Union of all request schemas
 export const RpcRequestSchema = z.discriminatedUnion('type', [
   OpenFromFileRequest,
@@ -138,6 +148,8 @@ export const RpcRequestSchema = z.discriminatedUnion('type', [
   GetCheckpointsRequest,
   QueryRequest,
   ExportDatabaseRequest,
+  HasEnvelopeTablesRequest,
+  ExtractEnvelopeRequest,
 ]);
 
 // Infer TypeScript type from schema

@@ -157,6 +157,7 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
               <ModalityBadge
                 modality={glyphCase.modality}
                 envelopeStats={glyphCase.envelopeStats}
+                envelopeExtracted={glyphCase.info?.envelopeExtracted}
                 onEnableDynamic={glyphCase.enableDynamicMode}
                 onSaveGlyphCase={async () => {
                   const blob = await glyphCase.saveGlyphCase();

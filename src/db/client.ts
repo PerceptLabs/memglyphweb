@@ -255,6 +255,26 @@ export class DbClient {
     });
   }
 
+  /**
+   * Check if a database file contains envelope tables (canonical .gcase+ format)
+   */
+  async hasEnvelopeTables(fileBytes: Uint8Array): Promise<boolean> {
+    return this.sendRequest<boolean>({
+      type: 'HAS_ENVELOPE_TABLES',
+      fileBytes
+    });
+  }
+
+  /**
+   * Extract envelope tables from a canonical .gcase+ file to OPFS sidecar
+   */
+  async extractEnvelope(file: File): Promise<void> {
+    return this.sendRequest<void>({
+      type: 'EXTRACT_ENVELOPE',
+      file
+    });
+  }
+
   getQueueStats(): QueryQueueStats {
     return getQueryQueue().getStats();
   }
