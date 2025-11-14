@@ -12,6 +12,9 @@ import type { HybridResult } from '../../db/types';
 import { publishLlmPrompt, publishLlmOutput, publishLlmCitation } from '../../core/stream';
 import { glyphCaseManager } from '../../db/glyphcase.manager';
 import { generateEnvelopeId } from '../../db/envelope.writer';
+import { getLogger } from '@logtape/logtape';
+
+const logger = getLogger(['llm']);
 
 export interface UseLlmOptions {
   autoReason?: boolean;  // Auto-trigger reasoning after search
@@ -103,11 +106,14 @@ export function useLlm(options: UseLlmOptions = {}) {
       const info = await llmClient.loadModel(QWEN_MODELS['0.6b']);
       setModelInfo(info);
       setProgress(null);
-      console.log('[LLM] Model loaded:', info);
+      logger.info('Model loaded successfully', {
+        modelId: info.modelId,
+        size_mb: info.size
+      });
     } catch (err) {
       const errorMsg = String(err);
       setError(errorMsg);
-      console.error('[LLM] Failed to load model:', err);
+      logger.error('Failed to load model', { error: errorMsg });
     } finally {
       setLoading(false);
     }
@@ -133,9 +139,11 @@ export function useLlm(options: UseLlmOptions = {}) {
           const llmClient = getLlmClient();
           await llmClient.unloadModel();
           setModelInfo({ ...modelInfo, loaded: false });
-          console.log('[LLM] Model unloaded successfully');
+          logger.info('Model unloaded successfully', {
+            modelId: modelInfo.modelId
+          });
         } catch (err) {
-          console.error('[LLM] Failed to unload model:', err);
+          logger.error('Failed to unload model', { error: String(err) });
         }
       }
     }
@@ -146,7 +154,7 @@ export function useLlm(options: UseLlmOptions = {}) {
    */
   const reason = async (query: string, results: HybridResult[], maxTokens = 256) => {
     if (!modelInfo?.loaded) {
-      console.warn('[LLM] Cannot reason: model not loaded');
+      logger.warn('Cannot reason: model not loaded');
       return;
     }
 
@@ -158,7 +166,7 @@ export function useLlm(options: UseLlmOptions = {}) {
       const waitTime = Math.ceil((MIN_REASON_INTERVAL - timeSinceLastReason) / 1000);
       const errorMsg = `Please wait ${waitTime}s before making another query (rate limit: 1 query per 5 seconds)`;
       setError(errorMsg);
-      console.warn('[LLM] Rate limit hit:', errorMsg);
+      logger.warn('Rate limit hit', { wait_seconds: waitTime });
       return;
     }
 
@@ -239,13 +247,18 @@ export function useLlm(options: UseLlmOptions = {}) {
 
       setReasoning(response);
       setIsStreaming(false);
-      console.log('[LLM] Reasoning complete:', response);
+      logger.info('Reasoning complete', {
+        query,
+        tokensGenerated: response.tokensGenerated,
+        inferenceTimeMs: response.inferenceTimeMs,
+        usedSnippets: response.usedSnippets.length
+      });
     } catch (err) {
       const errorMsg = String(err);
       setError(errorMsg);
       setIsStreaming(false);
       setStreamingText('');
-      console.error('[LLM] Reasoning failed:', err);
+      logger.error('Reasoning failed', { query, error: errorMsg });
     } finally {
       setLoading(false);
     }
@@ -261,9 +274,9 @@ export function useLlm(options: UseLlmOptions = {}) {
       setIsStreaming(false);
       setStreamingText('');
       setLoading(false);
-      console.log('[LLM] Reasoning aborted');
+      logger.info('Reasoning aborted');
     } catch (err) {
-      console.error('[LLM] Failed to abort reasoning:', err);
+      logger.error('Failed to abort reasoning', { error: String(err) });
     }
   };
 

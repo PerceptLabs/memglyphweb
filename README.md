@@ -322,7 +322,7 @@ Unlike cloud LLMs that might "make up" answers, this approach:
    - Append-only SQLite database
    - Hash-chained integrity (SHA-256 Merkle chain)
    - Stored separately in OPFS
-   - Captures: search queries, feedback signals, LLM interactions, embeddings
+   - Captures: search queries, feedback signals, LLM interactions, embeddings, system logs
    - **Exportable** for external remint tooling
 
 3. **Stream (Working Memory)** - Ephemeral event bus
@@ -351,6 +351,42 @@ Unlike cloud LLMs that might "make up" answers, this approach:
 - **📦 Save GlyphCase** - Download .gcase+ file for offline storage or reminting
 - **✓ Integrity Verification** - Validate hash chain before reminting
 - **🔄 Remint Ready** - Complete workflow for knowledge consolidation
+- **📊 Observability** - Structured logging with LogTape for debugging and analytics
+
+### Observability with LogTape
+
+**Structured Logging** persisted to the Envelope for complete audit trails:
+
+**What Gets Logged:**
+- 🔍 **Search Operations** - Query, mode, hit count, duration
+- 🤖 **LLM Interactions** - Prompts, responses, inference time
+- 📁 **Capsule Operations** - Opens, closes, saves, mode changes
+- ⚠️ **Errors & Warnings** - Full context for debugging
+- 🐌 **Performance Issues** - Slow queries automatically flagged (>1s)
+
+**Query Envelope Logs:**
+```sql
+-- Recent errors
+SELECT * FROM env_logs
+WHERE level = 'error'
+ORDER BY created_at DESC;
+
+-- Slow searches
+SELECT context->>'query', context->>'duration_ms'
+FROM env_logs
+WHERE level = 'warn' AND message = 'Slow search detected';
+
+-- LLM usage statistics
+SELECT COUNT(*) as llm_queries,
+       AVG(CAST(context->>'inferenceTimeMs' AS INTEGER)) as avg_ms
+FROM env_logs
+WHERE logger = 'llm' AND message = 'Reasoning complete';
+```
+
+**Benefits:**
+- **Debugging** - Full history of what happened during a session
+- **Analytics** - Understand usage patterns and performance
+- **Reminting** - Use logs to identify content gaps and improvements
 
 ### Reminting Workflow
 

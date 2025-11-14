@@ -11,6 +11,9 @@ import type { HybridResult, FtsResult } from '../../db/types';
 import { publishRetrievalQuery, publishRetrievalResult } from '../../core/stream';
 import { glyphCaseManager } from '../../db/glyphcase.manager';
 import { generateEnvelopeId } from '../../db/envelope.writer';
+import { getLogger } from '@logtape/logtape';
+
+const logger = getLogger(['search']);
 
 export type SearchMode = 'fts' | 'hybrid' | 'graph';
 
@@ -92,7 +95,7 @@ export function useSearch(options: UseSearchOptions = {}) {
       try {
         localStorage.setItem('memglyph-search-history', JSON.stringify(updated));
       } catch (e) {
-        console.warn('[Search] Failed to save history:', e);
+        logger.warn('Failed to save search history', { error: String(e) });
       }
 
       return updated;
@@ -107,7 +110,7 @@ export function useSearch(options: UseSearchOptions = {}) {
     try {
       localStorage.removeItem('memglyph-search-history');
     } catch (e) {
-      console.warn('[Search] Failed to clear history:', e);
+      logger.warn('Failed to clear search history', { error: String(e) });
     }
   };
 
@@ -174,14 +177,33 @@ export function useSearch(options: UseSearchOptions = {}) {
         await logToEnvelope(query, mode, searchResults);
       }
 
-      setResults(searchResults);
-      console.log(`[Search] ${mode} mode: ${searchResults.length} results in ${executionTime.toFixed(0)}ms`);
+      // Log search completion
+      logger.info('Search completed', {
+        query,
+        mode,
+        hits: searchResults.length,
+        duration_ms: Math.round(executionTime)
+      });
 
+      // Warn on slow searches
+      if (executionTime > 1000) {
+        logger.warn('Slow search detected', {
+          query,
+          mode,
+          duration_ms: Math.round(executionTime)
+        });
+      }
+
+      setResults(searchResults);
       return searchResults;
     } catch (err) {
       const errorMsg = String(err);
       setError(errorMsg);
-      console.error('[Search] Failed:', err);
+      logger.error('Search failed', {
+        query,
+        mode,
+        error: errorMsg
+      });
       return [];
     } finally {
       setLoading(false);
@@ -285,13 +307,13 @@ async function logToEnvelope(
     const envelope = glyphCaseManager.getEnvelope();
     if (!envelope.isOpen()) {
       // Envelope not open yet - this shouldn't happen but handle gracefully
-      console.warn('[Search] Envelope not open, skipping log');
+      logger.warn('Envelope not open, skipping retrieval log', { query, mode });
       return;
     }
 
     const writer = envelope.getWriter();
     if (!writer) {
-      console.warn('[Search] No envelope writer available');
+      logger.warn('No envelope writer available', { query, mode });
       return;
     }
 
@@ -307,9 +329,17 @@ async function logToEnvelope(
       hit_count: results.length
     });
 
-    console.log(`[Search] Logged retrieval to envelope: ${results.length} results`);
+    logger.debug('Logged retrieval to envelope', {
+      query,
+      mode,
+      results: results.length
+    });
   } catch (err) {
-    console.error('[Search] Failed to log to envelope:', err);
+    logger.error('Failed to log to envelope', {
+      query,
+      mode,
+      error: String(err)
+    });
     // Don't throw - envelope logging should not break search
   }
 }

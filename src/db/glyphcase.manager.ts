@@ -22,6 +22,9 @@ import { DbClient } from './client';
 import { EnvelopeManager, type Modality, type EnvelopeStats } from './envelope.manager';
 import { stream, publishCapsuleLoaded, publishCapsuleUnloaded } from '../core/stream';
 import type { CapsuleInfo } from './rpc-contract';
+import { getLogger } from '@logtape/logtape';
+
+const logger = getLogger(['glyphcase']);
 
 export interface GlyphCaseInfo extends CapsuleInfo {
   modality: Modality;
@@ -87,9 +90,10 @@ export class GlyphCaseManager {
 
     // Detect Active GlyphCase (.gcasex) - apps are not supported in PWA
     if (file.name.endsWith('.gcasex')) {
-      console.info('[GlyphCase] Active GlyphCase detected (.gcasex)');
-      console.info('[GlyphCase] WASM apps are not supported in PWA - treating as Dynamic mode');
-      console.info('[GlyphCase] All content and envelope data will be accessible');
+      logger.info('Active GlyphCase detected', {
+        filename: file.name,
+        note: 'WASM apps not supported in PWA - treating as Dynamic mode'
+      });
       // Apps_registry tables will be ignored, file treated as .gcase+
     }
 
@@ -98,11 +102,13 @@ export class GlyphCaseManager {
     const hasEnvelope = await this.dbClient.hasEnvelopeTables(fileBytes);
 
     if (hasEnvelope) {
-      console.log('[GlyphCase] Detected canonical file with embedded envelope tables');
+      logger.info('Detected canonical file with embedded envelope', {
+        filename: file.name
+      });
 
       // Extract envelope tables to OPFS sidecar for runtime writes
       await this.dbClient.extractEnvelope(file);
-      console.log('[GlyphCase] Envelope extracted to runtime sidecar');
+      logger.info('Envelope extracted to runtime sidecar');
     }
 
     // Open Core database
@@ -126,7 +132,10 @@ export class GlyphCaseManager {
     if (modality === 'dynamic') {
       // Envelope is now available in OPFS sidecar
       envelopeStats = this.envelopeManager.getStats() || undefined;
-      console.log('[GlyphCase] Dynamic mode active with envelope sidecar');
+      logger.info('Dynamic mode active', {
+        filename: file.name,
+        stats: envelopeStats
+      });
     }
 
     this.currentInfo = {
@@ -176,7 +185,7 @@ export class GlyphCaseManager {
     }
 
     if (this.currentModality === 'dynamic') {
-      console.log('[GlyphCase] Already in dynamic mode');
+      logger.info('Already in dynamic mode');
       return;
     }
 
@@ -187,7 +196,7 @@ export class GlyphCaseManager {
       this.currentInfo.modality = 'dynamic';
     }
 
-    console.log('[GlyphCase] Enabled dynamic mode');
+    logger.info('Enabled dynamic mode');
   }
 
   /**
@@ -271,13 +280,13 @@ export class GlyphCaseManager {
 
     // If static mode, just export Core
     if (this.currentModality === 'static') {
-      console.log('[GlyphCase] Saving Standard GlyphCase (Core only)');
+      logger.info('Saving Standard GlyphCase (Core only)');
       const coreBytes = await this.dbClient.exportDatabase();
       return new Blob([coreBytes], { type: 'application/x-sqlite3' });
     }
 
     // Dynamic mode: merge Core + Envelope using worker
-    console.log('[GlyphCase] Saving Dynamic GlyphCase (.gcase+)');
+    logger.info('Saving Dynamic GlyphCase (.gcase+)');
     const mergedBytes = await this.dbClient.mergeWithEnvelope(this.currentFile);
     return new Blob([mergedBytes], { type: 'application/x-sqlite3' });
   }
