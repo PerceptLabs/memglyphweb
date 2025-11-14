@@ -14,9 +14,11 @@
  * - Summary text: 100KB
  * - Embedding vector: 10K dimensions
  * - Metadata JSON: 50KB
+ * - Log message: 10KB
+ * - Log context: 50KB
  */
 
-export type EnvelopeTable = 'retrieval_log' | 'embeddings' | 'feedback' | 'summaries';
+export type EnvelopeTable = 'retrieval_log' | 'embeddings' | 'feedback' | 'summaries' | 'logs';
 
 // Size limits (in bytes or elements)
 const SIZE_LIMITS = {
@@ -25,7 +27,9 @@ const SIZE_LIMITS = {
   FEEDBACK_NOTES: 50 * 1024,    // 50KB
   SUMMARY_TEXT: 100 * 1024,     // 100KB
   EMBEDDING_DIMS: 10000,        // 10K dimensions
-  METADATA_JSON: 50 * 1024      // 50KB
+  METADATA_JSON: 50 * 1024,     // 50KB
+  LOG_MESSAGE: 10 * 1024,       // 10KB
+  LOG_CONTEXT: 50 * 1024        // 50KB
 } as const;
 
 export interface EnvelopeAppend {
@@ -60,6 +64,14 @@ export interface SummaryData {
   summary: string;
   relevance: number;
   source_retrievals?: string[];
+}
+
+export interface LogData {
+  id: string;
+  level: 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+  logger: string;
+  message: string;
+  context?: Record<string, any>;
 }
 
 export interface ChainBlock {
@@ -367,6 +379,55 @@ export class EnvelopeWriter {
   }
 
   /**
+   * Append a log entry
+   */
+  async appendLog(data: LogData): Promise<string> {
+    // Apply size limits
+    const safeMessage = truncateToSize(data.message, SIZE_LIMITS.LOG_MESSAGE);
+    const contextJson = data.context ? JSON.stringify(data.context) : null;
+    const safeContext = contextJson
+      ? truncateToSize(contextJson, SIZE_LIMITS.LOG_CONTEXT)
+      : null;
+
+    const timestamp = new Date().toISOString();
+    const hash = await computeHash({
+      table: 'logs',
+      rowId: data.id,
+      data: { ...data, message: safeMessage },
+      parentHash: this.lastHash,
+      timestamp
+    });
+
+    // Insert into logs
+    const stmt = this.db.prepare(`
+      INSERT INTO env_logs
+      (id, level, logger, message, context, parent_hash, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    try {
+      stmt.bind([
+        data.id,
+        data.level,
+        data.logger,
+        safeMessage,
+        safeContext,
+        this.lastHash,
+        timestamp
+      ]);
+      stmt.step();
+    } finally {
+      stmt.finalize();
+    }
+
+    // Record in chain
+    await this.recordChainBlock(hash, 'log', 1);
+
+    this.lastHash = hash;
+    return hash;
+  }
+
+  /**
    * Record a block in the hash chain
    */
   private async recordChainBlock(
@@ -390,10 +451,13 @@ export class EnvelopeWriter {
         const seq = seqStmt.get([])[0];
 
         // Update the last record with the sequence number
+        const tableName = blockType === 'retrieval' ? 'retrieval_log' :
+                          blockType === 'embedding' ? 'embeddings' :
+                          blockType === 'feedback' ? 'feedback' :
+                          blockType === 'summary' ? 'context_summaries' : 'logs';
+
         const updateStmt = this.db.prepare(`
-          UPDATE env_${blockType === 'retrieval' ? 'retrieval_log' :
-                        blockType === 'embedding' ? 'embeddings' :
-                        blockType === 'feedback' ? 'feedback' : 'context_summaries'}
+          UPDATE env_${tableName}
           SET seq = ?
           WHERE parent_hash = ?
         `);

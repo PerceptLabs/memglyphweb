@@ -85,12 +85,20 @@ export class GlyphCaseManager {
   async openFromFile(file: File, requestDynamic?: boolean): Promise<GlyphCaseInfo> {
     this.currentFile = file;
 
-    // Check if file has envelope tables embedded (canonical .gcase+ format)
+    // Detect Active GlyphCase (.gcasex) - apps are not supported in PWA
+    if (file.name.endsWith('.gcasex')) {
+      console.info('[GlyphCase] Active GlyphCase detected (.gcasex)');
+      console.info('[GlyphCase] WASM apps are not supported in PWA - treating as Dynamic mode');
+      console.info('[GlyphCase] All content and envelope data will be accessible');
+      // Apps_registry tables will be ignored, file treated as .gcase+
+    }
+
+    // Check if file has envelope tables embedded (canonical .gcase+ or .gcasex format)
     const fileBytes = new Uint8Array(await file.arrayBuffer());
     const hasEnvelope = await this.dbClient.hasEnvelopeTables(fileBytes);
 
     if (hasEnvelope) {
-      console.log('[GlyphCase] Detected canonical .gcase+ file with embedded envelope');
+      console.log('[GlyphCase] Detected canonical file with embedded envelope tables');
 
       // Extract envelope tables to OPFS sidecar for runtime writes
       await this.dbClient.extractEnvelope(file);

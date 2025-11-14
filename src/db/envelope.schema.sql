@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS _env_chain (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   block_hash TEXT NOT NULL UNIQUE,
   parent_hash TEXT NOT NULL,
-  block_type TEXT NOT NULL, -- 'retrieval' | 'embedding' | 'feedback' | 'summary'
+  block_type TEXT NOT NULL, -- 'retrieval' | 'embedding' | 'feedback' | 'summary' | 'log'
   row_count INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 ) STRICT;
@@ -117,6 +117,28 @@ CREATE INDEX IF NOT EXISTS idx_summaries_relevance ON env_context_summaries(rele
 CREATE INDEX IF NOT EXISTS idx_summaries_created ON env_context_summaries(created_at);
 
 -- ============================================================================
+-- OBSERVABILITY LOGS
+-- ============================================================================
+
+-- System and application logs for debugging, analytics, and audit trails
+-- Captures errors, warnings, performance issues, and system events
+CREATE TABLE IF NOT EXISTS env_logs (
+  id TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL REFERENCES _env_chain(seq),
+  level TEXT NOT NULL CHECK(level IN ('debug', 'info', 'warn', 'error', 'fatal')),
+  logger TEXT NOT NULL, -- Hierarchical logger name: 'search.fts', 'llm.inference'
+  message TEXT NOT NULL,
+  context TEXT, -- JSON with structured metadata
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  parent_hash TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_env_logs_level ON env_logs(level);
+CREATE INDEX IF NOT EXISTS idx_env_logs_logger ON env_logs(logger);
+CREATE INDEX IF NOT EXISTS idx_env_logs_created ON env_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_env_logs_seq ON env_logs(seq);
+
+-- ============================================================================
 -- VIEWS
 -- ============================================================================
 
@@ -145,6 +167,15 @@ SELECT
   substr(summary, 1, 100) as description,
   relevance as value
 FROM env_context_summaries
+UNION ALL
+SELECT
+  'log' as event_type,
+  id,
+  created_at as timestamp,
+  '[' || level || '] ' || logger || ': ' || message as description,
+  NULL as value
+FROM env_logs
+WHERE level IN ('warn', 'error', 'fatal')
 ORDER BY timestamp DESC
 LIMIT 100;
 
@@ -155,6 +186,7 @@ SELECT
   (SELECT COUNT(*) FROM env_embeddings) as embedding_count,
   (SELECT COUNT(*) FROM env_feedback) as feedback_count,
   (SELECT COUNT(*) FROM env_context_summaries) as summary_count,
+  (SELECT COUNT(*) FROM env_logs) as log_count,
   (SELECT COUNT(*) FROM _env_chain) as chain_length,
   (SELECT MIN(ts) FROM env_retrieval_log) as first_activity,
   (SELECT MAX(ts) FROM env_retrieval_log) as last_activity;

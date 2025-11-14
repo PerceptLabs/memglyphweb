@@ -17,6 +17,9 @@ import { PageRouter } from './features/router';
 // Configuration
 import { getConfig } from './config/features';
 
+// Logging
+import { initLogging } from './core/logging';
+
 export function App() {
   const config = getConfig();
 
@@ -38,6 +41,11 @@ export function App() {
   const llm = useLlm({
     autoReason: config.features.llm.autoReason,
   });
+
+  // Initialize logging on mount
+  useEffect(() => {
+    initLogging();
+  }, []);
 
   // Load entities and detect GCUI when capsule is opened
   useEffect(() => {
