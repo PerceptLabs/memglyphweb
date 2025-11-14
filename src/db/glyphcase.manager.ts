@@ -7,14 +7,14 @@
  * - Active   .gcasex = Core + Envelope + Apps registry in ONE file
  *
  * RUNTIME IMPLEMENTATION: Uses OPFS sidecar for Envelope writes (performance).
- * The sidecar is invisible to users and gets merged into the canonical file on export.
+ * The sidecar is invisible to users and gets merged into the canonical file when saved.
  *
  * Handles:
  * - Modality detection (static vs dynamic)
  * - Core (DbClient) initialization
  * - Envelope sidecar initialization (runtime write buffer)
  * - Stream event publishing
- * - Canonical export (merges Core + Envelope into single file)
+ * - Canonical save (merges Core + Envelope into single file)
  * - Unified memory API
  */
 

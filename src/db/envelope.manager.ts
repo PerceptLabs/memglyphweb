@@ -7,13 +7,14 @@
  * RUNTIME IMPLEMENTATION: For browser performance and SQLite concurrency,
  * this manager uses an OPFS sidecar as a write buffer for Envelope tables.
  * The sidecar is an invisible implementation detail that gets merged back
- * into the canonical .gcase+ file on export.
+ * into the canonical .gcase+ file when saved.
  *
  * Handles:
  * - Creating/loading envelope sidecar in OPFS (runtime write buffer)
  * - Linking sidecar to Core capsule via SHA-256 hash
  * - Schema initialization in sidecar
- * - Merging sidecar back to canonical format on export
+ * - Detecting/extracting envelopes from canonical .gcase+ files
+ * - Merging sidecar back to canonical format when saving
  */
 
 import envelopeSchema from './envelope.schema.sql?raw';

@@ -2,15 +2,16 @@
 
 **Reminting** is the process of consolidating validated Envelope data into the immutable Core, creating a new canonical version of a GlyphCase.
 
-This guide explains how to work with GlyphCase envelopes exported from MemGlyph PWA and perform reminting using external tools.
+This guide explains how to work with canonical .gcase+ files (Core + Envelope) saved from MemGlyph PWA and perform reminting using external tools.
 
 ---
 
 ## 📋 Table of Contents
 
 - [Overview](#overview)
+- [Canonical .gcase+ Format](#canonical-gcase-format)
 - [Envelope Structure](#envelope-structure)
-- [Export from MemGlyph PWA](#export-from-memglyph-pwa)
+- [Save from MemGlyph PWA](#save-from-memglyph-pwa)
 - [Envelope Validation](#envelope-validation)
 - [Remint Process](#remint-process)
 - [Python Example Tool](#python-example-tool)
@@ -35,6 +36,34 @@ This guide explains how to work with GlyphCase envelopes exported from MemGlyph 
 - **Performance:** Reduce Envelope size, improve query efficiency
 - **Provenance:** Maintain traceable lineage of knowledge evolution
 - **Trust:** Cryptographic verification of data integrity
+
+---
+
+## 📦 Canonical .gcase+ Format
+
+### What is a .gcase+ file?
+
+A **Dynamic GlyphCase** (`.gcase+`) is a single, self-contained SQLite database file that contains:
+
+1. **Core Tables** - Immutable knowledge base (pages, entities, FTS, vectors)
+2. **Envelope Tables** - Runtime learning layer (retrieval logs, feedback, embeddings, summaries)
+3. **Unified Schema** - Both Core and Envelope tables in one database
+
+### Key Principles
+
+**Canonical Format:**
+- `.gcase+` files are ALWAYS single, self-contained SQLite databases
+- Core and Envelope tables are merged into one file
+- No external dependencies or sidecar files
+
+**Runtime Implementation:**
+- MemGlyph PWA uses an OPFS sidecar as a temporary write buffer for performance
+- The sidecar is invisible to users and automatically synced
+- When you save, Core + Envelope are merged into the canonical .gcase+ format
+
+**File Extensions:**
+- `.gcase` - Static GlyphCase (Core only, read-only)
+- `.gcase+` - Dynamic GlyphCase (Core + Envelope)
 
 ---
 
@@ -130,21 +159,40 @@ CREATE TABLE env_context_summaries (
 
 ---
 
-## 📤 Export from MemGlyph PWA
+## 💾 Save from MemGlyph PWA
 
-### Browser Export
+### Browser Save
 
 1. Open a GlyphCase in Dynamic mode
 2. Click the **🧠 Dynamic** modality badge
-3. Select **📦 Export Envelope**
-4. Save the `.db` file (e.g., `envelope_1673456789.db`)
+3. Select **💾 Save GlyphCase**
+4. Save the `.gcase+` file (e.g., `my-knowledge-base.gcase+`)
 
 ### What You Get
 
-- **SQLite database file** with all envelope tables
+- **Single SQLite database file** with Core + Envelope merged
+- **Canonical .gcase+ format** - fully self-contained
 - **Hash-chained integrity** for verification
-- **Linked to Core capsule** via `gcase_id`
-- **Standalone file** ready for processing
+- **All tables included**: Core pages, entities, FTS, and Envelope logs, feedback, embeddings
+
+### Working with the Saved File
+
+The saved `.gcase+` file contains both Core and Envelope tables in one database:
+
+```bash
+# Open with sqlite3 to inspect
+sqlite3 my-knowledge-base.gcase+
+
+# List all tables (you'll see both Core and Envelope tables)
+sqlite> .tables
+
+# Core tables: pages, entities, page_fts, vectors, etc.
+# Envelope tables: _envelope_meta, _env_chain, env_retrieval_log, env_feedback, etc.
+
+# Extract envelope data for analysis
+sqlite> SELECT * FROM env_retrieval_log LIMIT 5;
+sqlite> SELECT * FROM env_feedback WHERE rating = 1;
+```
 
 ---
 
@@ -152,17 +200,31 @@ CREATE TABLE env_context_summaries (
 
 ### Verify Integrity
 
-Before reminting, always verify the envelope's hash chain:
+Before reminting, always verify the envelope's hash chain in the .gcase+ file:
 
 ```python
 import sqlite3
 import hashlib
 import json
 
-def verify_envelope(db_path):
-    """Verify envelope hash chain integrity"""
-    conn = sqlite3.connect(db_path)
+def verify_envelope(gcase_plus_path):
+    """Verify envelope hash chain integrity in .gcase+ file"""
+    conn = sqlite3.connect(gcase_plus_path)
     cursor = conn.cursor()
+
+    # Check if envelope tables exist
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_env_chain'
+    """)
+
+    if not cursor.fetchone():
+        return {
+            'valid': True,
+            'length': 0,
+            'errors': [],
+            'note': 'No envelope tables found (static .gcase file)'
+        }
 
     # Get chain blocks in order
     cursor.execute("""
@@ -194,7 +256,7 @@ def verify_envelope(db_path):
     }
 
 # Usage
-result = verify_envelope('envelope_1673456789.db')
+result = verify_envelope('my-knowledge-base.gcase+')
 if result['valid']:
     print(f"✅ Envelope valid: {result['length']} blocks")
 else:
@@ -206,10 +268,20 @@ else:
 ### Check Metadata
 
 ```python
-def get_envelope_meta(db_path):
-    """Get envelope metadata"""
-    conn = sqlite3.connect(db_path)
+def get_envelope_meta(gcase_plus_path):
+    """Get envelope metadata from .gcase+ file"""
+    conn = sqlite3.connect(gcase_plus_path)
     cursor = conn.cursor()
+
+    # Check if envelope tables exist
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name='_envelope_meta'
+    """)
+
+    if not cursor.fetchone():
+        conn.close()
+        return None
 
     cursor.execute("SELECT key, value FROM _envelope_meta")
     meta = dict(cursor.fetchall())
@@ -217,10 +289,13 @@ def get_envelope_meta(db_path):
     conn.close()
     return meta
 
-meta = get_envelope_meta('envelope_1673456789.db')
-print(f"Envelope for GCase: {meta['gcase_id']}")
-print(f"Created: {meta['created_at']}")
-print(f"Format: {meta['format_version']}")
+meta = get_envelope_meta('my-knowledge-base.gcase+')
+if meta:
+    print(f"Envelope for GCase: {meta['gcase_id']}")
+    print(f"Created: {meta['created_at']}")
+    print(f"Format: {meta['format_version']}")
+else:
+    print("No envelope metadata found (static .gcase file)")
 ```
 
 ---
@@ -238,20 +313,27 @@ print(f"Format: {meta['format_version']}")
 ### Example: Merge High-Quality Embeddings
 
 ```python
-def remint_embeddings(core_db, envelope_db, min_quality=0.7):
+def remint_embeddings(gcase_plus_path, output_gcase_path, min_quality=0.7):
     """
-    Merge high-quality embeddings from Envelope to Core
+    Merge high-quality embeddings from Envelope into a new Core
+
+    Args:
+        gcase_plus_path: Path to .gcase+ file (Core + Envelope)
+        output_gcase_path: Path for new .gcase file (updated Core only)
+        min_quality: Minimum quality threshold for embeddings
     """
     import sqlite3
+    import shutil
 
-    # Connect to both databases
-    core_conn = sqlite3.connect(core_db)
-    env_conn = sqlite3.connect(envelope_db)
+    # Create a copy for the new Core
+    shutil.copy(gcase_plus_path, output_gcase_path)
 
-    # Find high-quality embeddings
+    conn = sqlite3.connect(output_gcase_path)
+    cursor = conn.cursor()
+
+    # Find high-quality embeddings from Envelope
     # (e.g., from queries with positive feedback)
-    env_cursor = env_conn.cursor()
-    env_cursor.execute("""
+    cursor.execute("""
         SELECT DISTINCT e.id, e.source, e.vector, e.metadata
         FROM env_embeddings e
         JOIN env_feedback f ON f.retrieval_id LIKE '%' || e.source || '%'
@@ -259,42 +341,59 @@ def remint_embeddings(core_db, envelope_db, min_quality=0.7):
         AND json_extract(e.metadata, '$.quality') >= ?
     """, (min_quality,))
 
-    embeddings = env_cursor.fetchall()
+    embeddings = cursor.fetchall()
 
-    # Insert into Core (if vectors table exists)
-    core_cursor = core_conn.cursor()
-
-    # Check if core has vector support
-    core_cursor.execute("""
+    # Check if Core has vector support
+    cursor.execute("""
         SELECT name FROM sqlite_master
         WHERE type='table' AND name='vectors'
     """)
 
-    if core_cursor.fetchone():
+    if cursor.fetchone():
         for emb_id, source, vector, metadata in embeddings:
-            # Insert into core_vectors with provenance
-            core_cursor.execute("""
+            # Insert into Core vectors with provenance
+            cursor.execute("""
                 INSERT INTO vectors (id, embedding, metadata)
                 VALUES (?, ?, json_set(?, '$.from_envelope', true))
             """, (emb_id, vector, metadata))
 
-        core_conn.commit()
         print(f"✅ Merged {len(embeddings)} embeddings into Core")
 
-    env_conn.close()
-    core_conn.close()
+    # Remove Envelope tables from the new Core file
+    envelope_tables = [
+        '_envelope_meta', '_env_chain', 'env_retrieval_log',
+        'env_embeddings', 'env_feedback', 'env_context_summaries'
+    ]
 
+    for table in envelope_tables:
+        cursor.execute(f"DROP TABLE IF EXISTS {table}")
+
+    # Drop envelope views and indexes
+    cursor.execute("""
+        SELECT name FROM sqlite_master
+        WHERE type IN ('view', 'index')
+        AND name LIKE 'env_%' OR name LIKE '_env_%'
+    """)
+
+    for row in cursor.fetchall():
+        obj_type = 'VIEW' if 'view' in str(row) else 'INDEX'
+        cursor.execute(f"DROP {obj_type} IF EXISTS {row[0]}")
+
+    conn.commit()
+    conn.close()
+
+    print(f"📦 Created new .gcase file: {output_gcase_path}")
     return len(embeddings)
 ```
 
 ### Example: Generate FTS Improvements
 
 ```python
-def analyze_search_patterns(envelope_db):
+def analyze_search_patterns(gcase_plus_path):
     """
-    Analyze search patterns to suggest FTS improvements
+    Analyze search patterns to suggest FTS improvements from .gcase+ file
     """
-    conn = sqlite3.connect(envelope_db)
+    conn = sqlite3.connect(gcase_plus_path)
     cursor = conn.cursor()
 
     # Find frequently searched terms with low hit counts
@@ -331,7 +430,7 @@ def analyze_search_patterns(envelope_db):
     }
 
 # Usage
-insights = analyze_search_patterns('envelope_1673456789.db')
+insights = analyze_search_patterns('my-knowledge-base.gcase+')
 print("Queries with low recall (may need synonyms or stemming):")
 for query, avg_hits, freq in insights['low_recall']:
     print(f"  - '{query}' (searched {freq}x, avg {avg_hits:.1f} results)")
@@ -347,24 +446,35 @@ for query, avg_hits, freq in insights['low_recall']:
 #!/usr/bin/env python3
 """
 GlyphCase Remint Tool
-Validates and merges Envelope data into Core
+Validates and merges Envelope data into Core from .gcase+ files
 """
 
 import sqlite3
 import argparse
 import hashlib
 import json
+import shutil
 from datetime import datetime
 
 class GlyphCaseRemint:
-    def __init__(self, core_path, envelope_path):
-        self.core_path = core_path
-        self.envelope_path = envelope_path
+    def __init__(self, gcase_plus_path, output_path=None):
+        self.gcase_plus_path = gcase_plus_path
+        self.output_path = output_path or gcase_plus_path.replace('.gcase+', '_reminted.gcase')
 
     def verify_envelope(self):
-        """Verify hash chain integrity"""
-        conn = sqlite3.connect(self.envelope_path)
+        """Verify hash chain integrity in .gcase+ file"""
+        conn = sqlite3.connect(self.gcase_plus_path)
         cursor = conn.cursor()
+
+        # Check if envelope tables exist
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='_env_chain'
+        """)
+
+        if not cursor.fetchone():
+            conn.close()
+            return True, "No envelope tables (static .gcase file)"
 
         cursor.execute("SELECT COUNT(*) FROM _env_chain")
         chain_length = cursor.fetchone()[0]
@@ -385,9 +495,19 @@ class GlyphCaseRemint:
         return True, f"Valid chain with {chain_length} blocks"
 
     def get_stats(self):
-        """Get envelope statistics"""
-        conn = sqlite3.connect(self.envelope_path)
+        """Get envelope statistics from .gcase+ file"""
+        conn = sqlite3.connect(self.gcase_plus_path)
         cursor = conn.cursor()
+
+        # Check if envelope stats view exists
+        cursor.execute("""
+            SELECT name FROM sqlite_master
+            WHERE type='view' AND name='v_envelope_stats'
+        """)
+
+        if not cursor.fetchone():
+            conn.close()
+            return None
 
         cursor.execute("SELECT * FROM v_envelope_stats")
         row = cursor.fetchone()
@@ -406,13 +526,12 @@ class GlyphCaseRemint:
         return stats
 
     def merge_feedback_insights(self):
-        """Example: Merge feedback-validated content"""
-        env_conn = sqlite3.connect(self.envelope_path)
-        core_conn = sqlite3.connect(self.core_path)
+        """Example: Merge feedback-validated content into new Core"""
+        conn = sqlite3.connect(self.gcase_plus_path)
+        cursor = conn.cursor()
 
-        # Find highly-rated queries
-        env_cursor = env_conn.cursor()
-        env_cursor.execute("""
+        # Find highly-rated queries from Envelope
+        cursor.execute("""
             SELECT r.query_text, r.top_docs, AVG(f.rating) as avg_rating
             FROM env_retrieval_log r
             JOIN env_feedback f ON f.retrieval_id = r.id
@@ -420,21 +539,19 @@ class GlyphCaseRemint:
             HAVING avg_rating >= 0.5
         """)
 
-        validated_queries = env_cursor.fetchall()
+        validated_queries = cursor.fetchall()
 
         # Could be used to improve search relevance, add to training data, etc.
         print(f"Found {len(validated_queries)} validated search patterns")
 
-        env_conn.close()
-        core_conn.close()
-
+        conn.close()
         return len(validated_queries)
 
     def run(self):
         """Execute remint process"""
         print("🔄 GlyphCase Remint Tool")
-        print(f"Core: {self.core_path}")
-        print(f"Envelope: {self.envelope_path}")
+        print(f"Input:  {self.gcase_plus_path}")
+        print(f"Output: {self.output_path}")
         print()
 
         # Step 1: Verify
@@ -449,40 +566,54 @@ class GlyphCaseRemint:
         # Step 2: Stats
         print("📊 Step 2: Envelope Statistics")
         stats = self.get_stats()
-        for key, value in stats.items():
-            print(f"  {key}: {value}")
+        if stats:
+            for key, value in stats.items():
+                print(f"  {key}: {value}")
+        else:
+            print("  No envelope data found")
         print()
 
         # Step 3: Merge (example)
-        print("🔀 Step 3: Merge Validated Data")
+        print("🔀 Step 3: Analyze Feedback Patterns")
         merged = self.merge_feedback_insights()
-        print(f"✅ Processed {merged} items")
+        print(f"✅ Found {merged} validated patterns")
+        print()
+
+        # Step 4: Create new Core (stripped of Envelope)
+        print("📦 Step 4: Create Reminted Core")
+        print(f"Creating new .gcase file at: {self.output_path}")
+        # Actual merge logic would go here
+        # (See remint_embeddings() example above)
         print()
 
         print("✨ Remint complete!")
+        print(f"📝 Next: Review {self.output_path} and publish as new version")
         return True
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='GlyphCase Remint Tool')
-    parser.add_argument('core', help='Path to Core GlyphCase (.gcase file)')
-    parser.add_argument('envelope', help='Path to Envelope database (.db file)')
+    parser.add_argument('gcase_plus', help='Path to .gcase+ file (Core + Envelope)')
+    parser.add_argument('--output', help='Path for output .gcase file (optional)')
 
     args = parser.parse_args()
 
-    remint = GlyphCaseRemint(args.core, args.envelope)
+    remint = GlyphCaseRemint(args.gcase_plus, args.output)
     remint.run()
 ```
 
 ### Usage
 
 ```bash
-# Verify and merge
-python remint_tool.py core_capsule.gcase envelope_1673456789.db
+# Verify and analyze a .gcase+ file
+python remint_tool.py my-knowledge-base.gcase+
+
+# Specify custom output path
+python remint_tool.py my-knowledge-base.gcase+ --output my-knowledge-base-v2.gcase
 
 # Output:
 # 🔄 GlyphCase Remint Tool
-# Core: core_capsule.gcase
-# Envelope: envelope_1673456789.db
+# Input:  my-knowledge-base.gcase+
+# Output: my-knowledge-base_reminted.gcase
 #
 # 📋 Step 1: Verify Envelope Integrity
 # ✅ Valid chain with 47 blocks
@@ -493,12 +624,17 @@ python remint_tool.py core_capsule.gcase envelope_1673456789.db
 #   feedbacks: 12
 #   summaries: 0
 #   chain_length: 47
-#   ...
+#   first_activity: 2025-11-01T10:23:45Z
+#   last_activity: 2025-11-14T14:52:10Z
 #
-# 🔀 Step 3: Merge Validated Data
-# ✅ Processed 8 items
+# 🔀 Step 3: Analyze Feedback Patterns
+# ✅ Found 8 validated patterns
+#
+# 📦 Step 4: Create Reminted Core
+# Creating new .gcase file at: my-knowledge-base_reminted.gcase
 #
 # ✨ Remint complete!
+# 📝 Next: Review my-knowledge-base_reminted.gcase and publish as new version
 ```
 
 ---
@@ -510,16 +646,15 @@ python remint_tool.py core_capsule.gcase envelope_1673456789.db
 ```bash
 # Never skip verification
 python -c "from remint_tool import GlyphCaseRemint; \
-    r = GlyphCaseRemint('core.gcase', 'env.db'); \
+    r = GlyphCaseRemint('my-knowledge-base.gcase+'); \
     print(r.verify_envelope())"
 ```
 
 ### 2. Backup Before Merge
 
 ```bash
-# Create backups
-cp core_capsule.gcase core_capsule.gcase.backup
-cp envelope.db envelope.db.backup
+# Create backups of your .gcase+ file
+cp my-knowledge-base.gcase+ my-knowledge-base.gcase+.backup
 ```
 
 ### 3. Review Before Remint
@@ -540,14 +675,17 @@ cp envelope.db envelope.db.backup
 - Document merge decisions
 - Maintain lineage records
 
-### 6. Seal Consumed Envelopes
+### 6. Archive Original .gcase+ Files
 
-After remint, archive the envelope:
+After reminting, archive the original .gcase+ file:
 
 ```bash
-# Move to archive
-mkdir -p envelopes/sealed/
-mv envelope_1673456789.db envelopes/sealed/envelope_v2_merged.db
+# Move to archive with version history
+mkdir -p archive/
+mv my-knowledge-base.gcase+ archive/my-knowledge-base-v1.gcase+
+
+# Or keep alongside the new Core
+mv my-knowledge-base.gcase+ my-knowledge-base-with-envelope-v1.gcase+
 ```
 
 ---

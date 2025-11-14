@@ -227,8 +227,9 @@ VITE_MODE=viewer
   - **Dynamic Mode** - Episodic memory with Envelope layer
   - **Envelope** - Hash-chained append-only runtime learning
   - **Stream** - Event bus for real-time coordination
+  - **Canonical Format** - Single .gcase+ file with Core + Envelope merged
   - **Activity Timeline** - Chronological visualization of searches, feedback, and summaries
-  - **Export Envelopes** - For external remint tooling
+  - **Save GlyphCase** - Download canonical .gcase+ with merged Core + Envelope
   - **Integrity Verification** - SHA-256 Merkle chain validation
 
 - **✅ GCUI Rendering**
@@ -340,23 +341,25 @@ Unlike cloud LLMs that might "make up" answers, this approach:
 - Core + Envelope + Stream
 - Records all interactions
 - Builds episodic memory over time
-- Exports for reminting (consolidating Envelope → Core)
+- Saves canonical .gcase+ for reminting (consolidating Envelope → Core)
 
 ### Key Features
 
 - **🔗 Hash Chaining** - Cryptographic integrity for all Envelope data
 - **📜 Activity Timeline** - Visual history of searches, feedback, summaries
-- **📦 Export Envelopes** - For external Python/Node remint tools
+- **💾 Canonical Format** - Single .gcase+ file with Core + Envelope merged together
+- **📦 Save GlyphCase** - Download .gcase+ file for offline storage or reminting
 - **✓ Integrity Verification** - Validate hash chain before reminting
 - **🔄 Remint Ready** - Complete workflow for knowledge consolidation
 
 ### Reminting Workflow
 
 1. **Capture** - Use Dynamic mode, search, give feedback
-2. **Export** - Download `.db` envelope file
+2. **Save** - Download canonical `.gcase+` file (Core + Envelope merged)
 3. **Validate** - Verify hash chain integrity
-4. **Review** - Analyze feedback, embeddings, patterns
+4. **Review** - Analyze feedback, embeddings, patterns in Envelope tables
 5. **Remint** - Consolidate valuable data back into Core (external tool)
+6. **Publish** - Create new .gcase file with updated Core
 
 [Read the complete Remint Guide →](docs/REMINT.md)
 
