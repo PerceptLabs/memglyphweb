@@ -128,6 +128,11 @@ const ExtractEnvelopeRequest = z.object({
   file: z.instanceof(File),
 });
 
+const MergeEnvelopeRequest = z.object({
+  type: z.literal('MERGE_ENVELOPE'),
+  file: z.instanceof(File),
+});
+
 // Union of all request schemas
 export const RpcRequestSchema = z.discriminatedUnion('type', [
   OpenFromFileRequest,
@@ -150,6 +155,7 @@ export const RpcRequestSchema = z.discriminatedUnion('type', [
   ExportDatabaseRequest,
   HasEnvelopeTablesRequest,
   ExtractEnvelopeRequest,
+  MergeEnvelopeRequest,
 ]);
 
 // Infer TypeScript type from schema

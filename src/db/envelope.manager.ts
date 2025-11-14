@@ -494,7 +494,7 @@ export class EnvelopeManager {
    * Export sidecar as standalone SQLite file (for debugging/inspection)
    *
    * NOTE: This exports the runtime sidecar, NOT the canonical .gcase+ format.
-   * For canonical export, use GlyphCaseManager.exportGlyphCase() which merges
+   * For canonical format, use GlyphCaseManager.saveGlyphCase() which merges
    * Core + Envelope into a single self-contained file.
    *
    * This method is useful for debugging or feeding to remint tooling.

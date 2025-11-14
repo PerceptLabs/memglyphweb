@@ -217,7 +217,7 @@ export function ModalityBadge({
               </div>
 
               <p className="envelope-hint">
-                💡 Save GlyphCase exports a single .gcase+ file with Core + Envelope merged together.
+                💡 Save GlyphCase creates a single .gcase+ file with Core + Envelope merged together.
               </p>
             </div>
           )}

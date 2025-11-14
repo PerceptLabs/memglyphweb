@@ -1002,7 +1002,7 @@ function executeQuery(sql: string, params: (string | number | null)[]): RpcRespo
  * Export current Core database as Uint8Array
  *
  * This exports the raw SQLite database bytes for merging with Envelope.
- * Used by GlyphCaseManager.exportGlyphCase() to create canonical .gcase+ files.
+ * Used by GlyphCaseManager.saveGlyphCase() to create canonical .gcase+ files.
  */
 function exportDatabase(): RpcResponse<Uint8Array> {
   if (!db) {
@@ -1205,6 +1205,157 @@ async function extractEnvelope(file: File): Promise<RpcResponse<void>> {
   }
 }
 
+/**
+ * Merge current Core database with envelope sidecar to create canonical .gcase+ file
+ */
+async function mergeWithEnvelope(file: File): Promise<RpcResponse<Uint8Array>> {
+  if (!db) {
+    return { ok: false, error: 'No database open' };
+  }
+
+  try {
+    // Get Core database bytes
+    const coreBytes = sqlite3.capi.sqlite3_js_db_export(db.pointer);
+    if (!coreBytes) {
+      return { ok: false, error: 'Failed to export Core database' };
+    }
+
+    // Compute envelope sidecar path
+    const gcaseId = await computeCapsuleHash(file);
+    const opfsPath = `/envelopes/${gcaseId}.db`;
+
+    console.log(`[Worker] Merging Core (${coreBytes.byteLength} bytes) with envelope sidecar...`);
+
+    // Check if sidecar exists
+    try {
+      const opfsRoot = await navigator.storage.getDirectory();
+      const envelopesDir = await opfsRoot.getDirectoryHandle('envelopes', { create: false });
+      await envelopesDir.getFileHandle(`${gcaseId}.db`, { create: false });
+    } catch {
+      // No sidecar exists, return Core only
+      console.log('[Worker] No envelope sidecar found, returning Core only');
+      return { ok: true, data: coreBytes };
+    }
+
+    // Create a new in-memory database for the merged result
+    const mergedDb = new sqlite3.oo1.DB(':memory:');
+
+    try {
+      // Import Core database into the merged DB
+      const rc = sqlite3.capi.sqlite3_deserialize(
+        mergedDb.pointer,
+        'main',
+        coreBytes,
+        coreBytes.byteLength,
+        coreBytes.byteLength,
+        sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+        sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+      );
+
+      if (rc !== 0) {
+        throw new Error(`Failed to deserialize Core database: ${rc}`);
+      }
+
+      console.log('[Worker] Core database loaded into memory');
+
+      // ATTACH the envelope sidecar
+      mergedDb.exec(`ATTACH DATABASE '${opfsPath}' AS envelope`);
+      console.log('[Worker] Attached envelope sidecar');
+
+      // Copy all envelope tables from sidecar to merged DB
+      const envelopeTables = [
+        '_envelope_meta',
+        '_env_chain',
+        'env_retrieval_log',
+        'env_embeddings',
+        'env_feedback',
+        'env_context_summaries'
+      ];
+
+      for (const table of envelopeTables) {
+        // Get CREATE statement
+        const createStmt = mergedDb.prepare(`
+          SELECT sql FROM envelope.sqlite_master
+          WHERE type='table' AND name=?
+        `);
+
+        try {
+          createStmt.bind([table]);
+          if (createStmt.step()) {
+            const createSql = createStmt.get([])[0];
+            if (createSql) {
+              // Create table in main DB
+              mergedDb.exec(createSql);
+
+              // Copy data
+              mergedDb.exec(`INSERT INTO main.${table} SELECT * FROM envelope.${table}`);
+              console.log(`[Worker] Copied table: ${table}`);
+            }
+          }
+        } finally {
+          createStmt.finalize();
+        }
+      }
+
+      // Copy views
+      const viewStmt = mergedDb.prepare(`
+        SELECT sql FROM envelope.sqlite_master
+        WHERE type='view' AND name LIKE 'env_%'
+      `);
+
+      try {
+        while (viewStmt.step()) {
+          const viewSql = viewStmt.get([])[0];
+          if (viewSql) {
+            mergedDb.exec(viewSql);
+            console.log('[Worker] Copied view');
+          }
+        }
+      } finally {
+        viewStmt.finalize();
+      }
+
+      // Copy indexes
+      const indexStmt = mergedDb.prepare(`
+        SELECT sql FROM envelope.sqlite_master
+        WHERE type='index' AND sql IS NOT NULL AND name LIKE 'idx_%'
+      `);
+
+      try {
+        while (indexStmt.step()) {
+          const indexSql = indexStmt.get([])[0];
+          if (indexSql && (indexSql.includes('env_') || indexSql.includes('_env_'))) {
+            try {
+              mergedDb.exec(indexSql);
+            } catch (err) {
+              console.warn('[Worker] Index copy failed:', err);
+            }
+          }
+        }
+      } finally {
+        indexStmt.finalize();
+      }
+
+      // DETACH sidecar
+      mergedDb.exec('DETACH DATABASE envelope');
+      console.log('[Worker] Detached envelope sidecar');
+
+      // Export merged database
+      const mergedBytes = sqlite3.capi.sqlite3_js_db_export(mergedDb.pointer);
+      if (!mergedBytes) {
+        throw new Error('Failed to export merged database');
+      }
+
+      console.log(`[Worker] Merge complete: ${mergedBytes.byteLength} bytes`);
+      return { ok: true, data: mergedBytes };
+    } finally {
+      mergedDb.close();
+    }
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
   try {
     switch (request.type) {
@@ -1269,6 +1420,9 @@ async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
 
       case 'EXTRACT_ENVELOPE':
         return await extractEnvelope(request.file);
+
+      case 'MERGE_ENVELOPE':
+        return await mergeWithEnvelope(request.file);
 
       case 'QUERY':
         return executeQuery(request.sql, request.params || []);

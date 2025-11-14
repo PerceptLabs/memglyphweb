@@ -257,18 +257,21 @@ export class GlyphCaseManager {
    * @returns Blob containing the .gcase or .gcase+ file
    */
   async saveGlyphCase(): Promise<Blob> {
-    // Get Core database bytes from worker
-    const coreBytes = await this.dbClient.exportDatabase();
+    if (!this.currentFile) {
+      throw new Error('No capsule loaded');
+    }
 
-    // If static mode or no envelope, just return Core
-    if (this.currentModality === 'static' || !this.envelopeManager.isOpen()) {
+    // If static mode, just export Core
+    if (this.currentModality === 'static') {
       console.log('[GlyphCase] Saving Standard GlyphCase (Core only)');
+      const coreBytes = await this.dbClient.exportDatabase();
       return new Blob([coreBytes], { type: 'application/x-sqlite3' });
     }
 
-    // Dynamic mode: merge Core + Envelope
+    // Dynamic mode: merge Core + Envelope using worker
     console.log('[GlyphCase] Saving Dynamic GlyphCase (.gcase+)');
-    return this.envelopeManager.mergeWithCore(coreBytes);
+    const mergedBytes = await this.dbClient.mergeWithEnvelope(this.currentFile);
+    return new Blob([mergedBytes], { type: 'application/x-sqlite3' });
   }
 
   /**
@@ -281,7 +284,7 @@ export class GlyphCaseManager {
   /**
    * Export sidecar for debugging (if in dynamic mode)
    *
-   * @deprecated Use exportGlyphCase() for canonical single-file export.
+   * @deprecated Use saveGlyphCase() for canonical single-file format.
    * This method exports the runtime sidecar for debugging/inspection only.
    */
   async exportEnvelopeSidecar(): Promise<Blob | null> {

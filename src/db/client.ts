@@ -275,6 +275,16 @@ export class DbClient {
     });
   }
 
+  /**
+   * Merge current Core database with envelope sidecar to create canonical .gcase+ file
+   */
+  async mergeWithEnvelope(file: File): Promise<Uint8Array> {
+    return this.sendRequest<Uint8Array>({
+      type: 'MERGE_ENVELOPE',
+      file
+    });
+  }
+
   getQueueStats(): QueryQueueStats {
     return getQueryQueue().getStats();
   }
