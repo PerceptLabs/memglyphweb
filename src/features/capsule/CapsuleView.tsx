@@ -158,16 +158,18 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                 modality={glyphCase.modality}
                 envelopeStats={glyphCase.envelopeStats}
                 onEnableDynamic={glyphCase.enableDynamicMode}
-                onExportEnvelope={async () => {
-                  const blob = await glyphCase.exportEnvelope();
-                  if (blob) {
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `envelope_${Date.now()}.db`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                  }
+                onExportGlyphCase={async () => {
+                  const blob = await glyphCase.exportGlyphCase();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  // Use .gcase for static, .gcase+ for dynamic
+                  const extension = glyphCase.modality === 'dynamic' ? '.gcase+' : '.gcase';
+                  const fileName = glyphCase.info?.fileName || 'glyphcase';
+                  const baseName = fileName.replace(/\.(db|gcase|gcase\+)$/, '');
+                  a.download = `${baseName}${extension}`;
+                  a.click();
+                  URL.revokeObjectURL(url);
                 }}
                 onClearEnvelope={glyphCase.clearEnvelope}
                 onVerifyEnvelope={async () => {

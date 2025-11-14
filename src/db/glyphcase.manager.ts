@@ -1,11 +1,20 @@
 /**
  * GlyphCase Manager - Unified interface for Static and Dynamic GlyphCases
  *
+ * CANONICAL FORMAT: A GlyphCase is ALWAYS one self-contained SQLite/SQLAR file.
+ * - Standard .gcase  = Core only (immutable)
+ * - Dynamic  .gcase+ = Core + Envelope tables in ONE file
+ * - Active   .gcasex = Core + Envelope + Apps registry in ONE file
+ *
+ * RUNTIME IMPLEMENTATION: Uses OPFS sidecar for Envelope writes (performance).
+ * The sidecar is invisible to users and gets merged into the canonical file on export.
+ *
  * Handles:
  * - Modality detection (static vs dynamic)
  * - Core (DbClient) initialization
- * - Envelope initialization (for dynamic mode)
+ * - Envelope sidecar initialization (runtime write buffer)
  * - Stream event publishing
+ * - Canonical export (merges Core + Envelope into single file)
  * - Unified memory API
  */
 
@@ -220,14 +229,44 @@ export class GlyphCaseManager {
   }
 
   /**
-   * Export envelope (if in dynamic mode)
+   * Export canonical .gcase+ file (Core + Envelope merged into one file)
+   *
+   * This is the CANONICAL export format per the GlyphCase specification.
+   * The result is a single, self-contained SQLite file with both Core
+   * and Envelope tables merged together.
+   *
+   * For static mode, returns the Core database only.
+   * For dynamic mode, merges Core + Envelope sidecar into one file.
+   *
+   * @returns Blob containing the .gcase or .gcase+ file
    */
-  async exportEnvelope(): Promise<Blob | null> {
+  async exportGlyphCase(): Promise<Blob> {
+    // Get Core database bytes from worker
+    const coreBytes = await this.dbClient.exportDatabase();
+
+    // If static mode or no envelope, just return Core
+    if (this.currentModality === 'static' || !this.envelopeManager.isOpen()) {
+      console.log('[GlyphCase] Exporting Standard GlyphCase (Core only)');
+      return new Blob([coreBytes], { type: 'application/x-sqlite3' });
+    }
+
+    // Dynamic mode: merge Core + Envelope
+    console.log('[GlyphCase] Exporting Dynamic GlyphCase (.gcase+)');
+    return this.envelopeManager.mergeWithCore(coreBytes);
+  }
+
+  /**
+   * Export sidecar for debugging (if in dynamic mode)
+   *
+   * @deprecated Use exportGlyphCase() for canonical single-file export.
+   * This method exports the runtime sidecar for debugging/inspection only.
+   */
+  async exportEnvelopeSidecar(): Promise<Blob | null> {
     if (!this.envelopeManager.isOpen()) {
       return null;
     }
 
-    return this.envelopeManager.export();
+    return this.envelopeManager.exportSidecar();
   }
 
   /**

@@ -1,11 +1,19 @@
 /**
- * EnvelopeManager - Manages Envelope database lifecycle
+ * EnvelopeManager - Manages Envelope runtime sidecar
+ *
+ * CANONICAL FORMAT: A .gcase+ file is ALWAYS one self-contained SQLite file
+ * containing both Core and Envelope tables in a single database.
+ *
+ * RUNTIME IMPLEMENTATION: For browser performance and SQLite concurrency,
+ * this manager uses an OPFS sidecar as a write buffer for Envelope tables.
+ * The sidecar is an invisible implementation detail that gets merged back
+ * into the canonical .gcase+ file on export.
  *
  * Handles:
- * - Creating/loading envelope DBs in OPFS
- * - Linking envelope to Core capsule
- * - Schema initialization
- * - Export/import for remint tooling
+ * - Creating/loading envelope sidecar in OPFS (runtime write buffer)
+ * - Linking sidecar to Core capsule via SHA-256 hash
+ * - Schema initialization in sidecar
+ * - Merging sidecar back to canonical format on export
  */
 
 import envelopeSchema from './envelope.schema.sql?raw';
@@ -41,16 +49,20 @@ async function computeCapsuleHash(file: File): Promise<string> {
 }
 
 /**
- * EnvelopeManager - Lifecycle management for Envelope DBs
+ * EnvelopeManager - Lifecycle management for Envelope runtime sidecar
+ *
+ * The sidecar is a temporary OPFS write buffer. The canonical .gcase+ file
+ * is always a single SQLite file with Core + Envelope tables merged together.
  */
 export class EnvelopeManager {
-  private db: any | null = null;
+  private db: any | null = null; // OPFS sidecar database (runtime write buffer)
   private writer: EnvelopeWriter | null = null;
-  private gcaseId: string | null = null;
-  private opfsPath: string | null = null;
+  private gcaseId: string | null = null; // SHA-256 hash of Core capsule
+  private opfsPath: string | null = null; // Path to sidecar in OPFS
+  private sqlite3: any | null = null; // SQLite3 instance (for merge operations)
 
   /**
-   * Check if an envelope exists for a given capsule
+   * Check if a runtime sidecar exists for a given capsule
    */
   static async exists(capsuleFile: File): Promise<boolean> {
     try {
@@ -68,17 +80,21 @@ export class EnvelopeManager {
   }
 
   /**
-   * Create a new envelope for a capsule
+   * Create a new runtime sidecar for a capsule
+   *
+   * NOTE: This creates a temporary OPFS write buffer, not the canonical format.
+   * Use exportGlyphCase() to get the canonical single-file .gcase+ format.
    */
   async create(capsuleFile: File, sqlite3: any): Promise<void> {
+    this.sqlite3 = sqlite3; // Store for later use
     this.gcaseId = await computeCapsuleHash(capsuleFile);
     this.opfsPath = `/envelopes/${this.gcaseId}.db`;
 
-    // Create OPFS directory if needed
+    // Create OPFS directory for sidecar if needed
     const opfsRoot = await navigator.storage.getDirectory();
     const envelopesDir = await opfsRoot.getDirectoryHandle('envelopes', { create: true });
 
-    // Create new SQLite database in OPFS
+    // Create new SQLite sidecar database in OPFS (runtime write buffer)
     this.db = new sqlite3.oo1.OpfsDb(this.opfsPath, 'c');
 
     // Initialize schema
@@ -113,6 +129,7 @@ export class EnvelopeManager {
    * Load an existing envelope for a capsule
    */
   async load(capsuleFile: File, sqlite3: any): Promise<void> {
+    this.sqlite3 = sqlite3; // Store for later use
     this.gcaseId = await computeCapsuleHash(capsuleFile);
     this.opfsPath = `/envelopes/${this.gcaseId}.db`;
 
@@ -261,14 +278,20 @@ export class EnvelopeManager {
   }
 
   /**
-   * Export envelope as SQLite file for remint tooling
+   * Export sidecar as standalone SQLite file (for debugging/inspection)
+   *
+   * NOTE: This exports the runtime sidecar, NOT the canonical .gcase+ format.
+   * For canonical export, use GlyphCaseManager.exportGlyphCase() which merges
+   * Core + Envelope into a single self-contained file.
+   *
+   * This method is useful for debugging or feeding to remint tooling.
    */
-  async export(): Promise<Blob> {
+  async exportSidecar(): Promise<Blob> {
     if (!this.db || !this.opfsPath) {
-      throw new Error('No envelope database open');
+      throw new Error('No envelope sidecar open');
     }
 
-    // Read the OPFS file
+    // Read the OPFS sidecar file
     const opfsRoot = await navigator.storage.getDirectory();
     const envelopesDir = await opfsRoot.getDirectoryHandle('envelopes');
     const fileHandle = await envelopesDir.getFileHandle(`${this.gcaseId}.db`);
@@ -352,6 +375,155 @@ export class EnvelopeManager {
    */
   getGCaseId(): string | null {
     return this.gcaseId;
+  }
+
+  /**
+   * Merge Core database with Envelope sidecar into canonical .gcase+ format
+   *
+   * Creates a single self-contained SQLite file with both Core and Envelope tables.
+   * This is the CANONICAL export format per the GlyphCase specification.
+   *
+   * @param coreBytes - Raw bytes of the Core SQLite database
+   * @returns Blob containing the merged .gcase+ database
+   */
+  async mergeWithCore(coreBytes: Uint8Array): Promise<Blob> {
+    if (!this.db || !this.opfsPath || !this.sqlite3) {
+      throw new Error('No envelope sidecar open or sqlite3 not available');
+    }
+
+    console.log(`[Envelope] Merging Core (${coreBytes.byteLength} bytes) with Envelope sidecar...`);
+
+    // Create a new in-memory database for the merged result
+    const mergedDb = new this.sqlite3.oo1.DB(':memory:');
+
+    try {
+      // Import Core database into the merged DB
+      const rc = this.sqlite3.capi.sqlite3_deserialize(
+        mergedDb.pointer,
+        'main',
+        coreBytes,
+        coreBytes.byteLength,
+        coreBytes.byteLength,
+        this.sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+        this.sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+      );
+
+      if (rc !== 0) {
+        throw new Error(`Failed to deserialize Core database: ${rc}`);
+      }
+
+      console.log('[Envelope] Core database loaded into memory');
+
+      // ATTACH the envelope sidecar
+      mergedDb.exec(`ATTACH DATABASE '${this.opfsPath}' AS envelope`);
+      console.log('[Envelope] Attached sidecar database');
+
+      // Copy all envelope tables from sidecar to merged DB
+      const envelopeTables = [
+        '_envelope_meta',
+        '_env_chain',
+        'env_retrieval_log',
+        'env_embeddings',
+        'env_feedback',
+        'env_context_summaries'
+      ];
+
+      for (const table of envelopeTables) {
+        // Get CREATE statement
+        const createStmt = mergedDb.prepare(`
+          SELECT sql FROM envelope.sqlite_master
+          WHERE type='table' AND name=?
+        `);
+
+        try {
+          createStmt.bind([table]);
+          if (createStmt.step()) {
+            const createSql = createStmt.get([])[0];
+            if (createSql) {
+              // Create table in main DB
+              mergedDb.exec(createSql);
+              console.log(`[Envelope] Created table: ${table}`);
+
+              // Copy data
+              mergedDb.exec(`INSERT INTO main.${table} SELECT * FROM envelope.${table}`);
+              const countStmt = mergedDb.prepare(`SELECT COUNT(*) FROM main.${table}`);
+              try {
+                countStmt.step();
+                const count = countStmt.get([])[0];
+                console.log(`[Envelope] Copied ${count} rows to ${table}`);
+              } finally {
+                countStmt.finalize();
+              }
+            }
+          }
+        } finally {
+          createStmt.finalize();
+        }
+      }
+
+      // Copy envelope views
+      const views = ['v_recent_activity', 'v_envelope_stats', 'v_search_analytics', 'v_zero_result_queries'];
+      for (const view of views) {
+        const viewStmt = mergedDb.prepare(`
+          SELECT sql FROM envelope.sqlite_master
+          WHERE type='view' AND name=?
+        `);
+
+        try {
+          viewStmt.bind([view]);
+          if (viewStmt.step()) {
+            const viewSql = viewStmt.get([])[0];
+            if (viewSql) {
+              mergedDb.exec(viewSql);
+              console.log(`[Envelope] Created view: ${view}`);
+            }
+          }
+        } finally {
+          viewStmt.finalize();
+        }
+      }
+
+      // Copy indexes
+      const indexStmt = mergedDb.prepare(`
+        SELECT sql FROM envelope.sqlite_master
+        WHERE type='index' AND sql IS NOT NULL
+      `);
+
+      try {
+        while (indexStmt.step()) {
+          const indexSql = indexStmt.get([])[0];
+          if (indexSql) {
+            try {
+              mergedDb.exec(indexSql);
+            } catch (err) {
+              console.warn(`[Envelope] Index already exists or failed:`, err);
+            }
+          }
+        }
+      } finally {
+        indexStmt.finalize();
+      }
+
+      // DETACH sidecar
+      mergedDb.exec('DETACH DATABASE envelope');
+      console.log('[Envelope] Detached sidecar');
+
+      // Export merged database as bytes
+      const exportedBytes = this.sqlite3.capi.sqlite3_js_db_export(mergedDb.pointer);
+
+      if (!exportedBytes) {
+        throw new Error('Failed to export merged database');
+      }
+
+      console.log(`[Envelope] Merged database exported: ${exportedBytes.byteLength} bytes`);
+
+      // Return as Blob
+      return new Blob([exportedBytes], { type: 'application/x-sqlite3' });
+
+    } finally {
+      // Close merged DB
+      mergedDb.close();
+    }
   }
 }
 

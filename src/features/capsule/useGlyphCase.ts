@@ -15,7 +15,8 @@ export interface UseGlyphCaseReturn {
   isDynamic: boolean;
   envelopeStats: EnvelopeStats | null;
   enableDynamicMode: () => Promise<void>;
-  exportEnvelope: () => Promise<Blob | null>;
+  exportGlyphCase: () => Promise<Blob>; // Canonical single-file export
+  exportEnvelopeSidecar: () => Promise<Blob | null>; // Debug only
   clearEnvelope: () => Promise<void>;
   verifyEnvelope: () => Promise<{ valid: boolean; errors: string[] } | null>;
   setModalityPreference: (mode: 'auto' | 'static' | 'dynamic') => void;
@@ -62,8 +63,12 @@ export function useGlyphCase(): UseGlyphCaseReturn {
     setModality('dynamic');
   };
 
-  const exportEnvelope = async () => {
-    return glyphCaseManager.exportEnvelope();
+  const exportGlyphCase = async () => {
+    return glyphCaseManager.exportGlyphCase();
+  };
+
+  const exportEnvelopeSidecar = async () => {
+    return glyphCaseManager.exportEnvelopeSidecar();
   };
 
   const clearEnvelope = async () => {
@@ -85,7 +90,8 @@ export function useGlyphCase(): UseGlyphCaseReturn {
     isDynamic: modality === 'dynamic',
     envelopeStats,
     enableDynamicMode,
-    exportEnvelope,
+    exportGlyphCase,
+    exportEnvelopeSidecar,
     clearEnvelope,
     verifyEnvelope,
     setModalityPreference

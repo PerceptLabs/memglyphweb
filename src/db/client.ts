@@ -233,6 +233,28 @@ export class DbClient {
     });
   }
 
+  /**
+   * Execute arbitrary SQL query (for advanced use cases)
+   */
+  async query(sql: string, params: (string | number | null)[] = []): Promise<any[]> {
+    return this.sendRequest<any[]>({
+      type: 'QUERY',
+      sql,
+      params
+    });
+  }
+
+  /**
+   * Export Core database as Uint8Array
+   *
+   * Used for creating canonical .gcase+ files (merges Core + Envelope).
+   */
+  async exportDatabase(): Promise<Uint8Array> {
+    return this.sendRequest<Uint8Array>({
+      type: 'EXPORT_DATABASE'
+    });
+  }
+
   getQueueStats(): QueryQueueStats {
     return getQueryQueue().getStats();
   }

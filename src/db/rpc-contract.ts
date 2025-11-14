@@ -114,6 +114,10 @@ const QueryRequest = z.object({
   params: z.array(z.union([z.string(), z.number(), z.null()])).optional().default([]),
 });
 
+const ExportDatabaseRequest = z.object({
+  type: z.literal('EXPORT_DATABASE'),
+});
+
 // Union of all request schemas
 export const RpcRequestSchema = z.discriminatedUnion('type', [
   OpenFromFileRequest,
@@ -133,6 +137,7 @@ export const RpcRequestSchema = z.discriminatedUnion('type', [
   VerifyPageRequest,
   GetCheckpointsRequest,
   QueryRequest,
+  ExportDatabaseRequest,
 ]);
 
 // Infer TypeScript type from schema

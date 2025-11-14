@@ -971,6 +971,59 @@ function graphHops(
 }
 
 // Handle RPC request
+/**
+ * Execute arbitrary SQL query (for advanced use cases)
+ */
+function executeQuery(sql: string, params: (string | number | null)[]): RpcResponse {
+  if (!db) {
+    return { ok: false, error: 'No database open' };
+  }
+
+  try {
+    const stmt = db.prepare(sql);
+    const results: any[] = [];
+
+    try {
+      stmt.bind(params);
+      while (stmt.step()) {
+        results.push(stmt.get([]));
+      }
+    } finally {
+      stmt.finalize();
+    }
+
+    return { ok: true, data: results };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+/**
+ * Export current Core database as Uint8Array
+ *
+ * This exports the raw SQLite database bytes for merging with Envelope.
+ * Used by GlyphCaseManager.exportGlyphCase() to create canonical .gcase+ files.
+ */
+function exportDatabase(): RpcResponse<Uint8Array> {
+  if (!db) {
+    return { ok: false, error: 'No database open' };
+  }
+
+  try {
+    // Export database to Uint8Array
+    const exported = sqlite3.capi.sqlite3_js_db_export(db.pointer);
+
+    if (!exported) {
+      return { ok: false, error: 'Failed to export database' };
+    }
+
+    console.log(`[Worker] Exported Core database: ${exported.byteLength} bytes`);
+    return { ok: true, data: exported };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
 async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
   try {
     switch (request.type) {
@@ -1026,6 +1079,12 @@ async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
           request.maxHops || 3,
           request.limit || 50
         );
+
+      case 'EXPORT_DATABASE':
+        return exportDatabase();
+
+      case 'QUERY':
+        return executeQuery(request.sql, request.params || []);
 
       default:
         return { ok: false, error: `Unknown request type: ${(request as any).type}` };

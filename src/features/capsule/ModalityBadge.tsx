@@ -13,7 +13,7 @@ export interface ModalityBadgeProps {
   modality: Modality;
   envelopeStats?: EnvelopeStats | null;
   onEnableDynamic?: () => Promise<void>;
-  onExportEnvelope?: () => Promise<void>;
+  onExportGlyphCase?: () => Promise<void>;
   onClearEnvelope?: () => Promise<void>;
   onVerifyEnvelope?: () => Promise<void>;
 }
@@ -22,7 +22,7 @@ export function ModalityBadge({
   modality,
   envelopeStats,
   onEnableDynamic,
-  onExportEnvelope,
+  onExportGlyphCase,
   onClearEnvelope,
   onVerifyEnvelope
 }: ModalityBadgeProps) {
@@ -43,14 +43,14 @@ export function ModalityBadge({
   };
 
   const handleExport = async () => {
-    if (!onExportEnvelope) return;
+    if (!onExportGlyphCase) return;
     setLoading(true);
     try {
-      await onExportEnvelope();
+      await onExportGlyphCase();
       setShowMenu(false);
     } catch (err) {
-      console.error('Failed to export envelope:', err);
-      alert(`Failed to export envelope: ${err}`);
+      console.error('Failed to export GlyphCase:', err);
+      alert(`Failed to export GlyphCase: ${err}`);
     } finally {
       setLoading(false);
     }
@@ -196,7 +196,7 @@ export function ModalityBadge({
                   onClick={handleExport}
                   disabled={loading}
                 >
-                  {loading ? 'Exporting...' : '📦 Export Envelope'}
+                  {loading ? 'Saving...' : '💾 Save GlyphCase'}
                 </button>
 
                 <button
@@ -209,7 +209,7 @@ export function ModalityBadge({
               </div>
 
               <p className="envelope-hint">
-                💡 Envelope data persists across sessions and can be exported for remint tooling.
+                💡 Save GlyphCase exports a single .gcase+ file with Core + Envelope merged together.
               </p>
             </div>
           )}
