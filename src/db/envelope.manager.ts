@@ -80,10 +80,223 @@ export class EnvelopeManager {
   }
 
   /**
+   * Check if a database file contains envelope tables (canonical .gcase+ format)
+   *
+   * @param sqlite3 - SQLite3 instance
+   * @param fileBytes - Raw database file bytes
+   * @returns true if the file has env_* tables
+   */
+  static hasEnvelopeTables(sqlite3: any, fileBytes: Uint8Array): boolean {
+    const tempDb = new sqlite3.oo1.DB(':memory:');
+
+    try {
+      // Deserialize the file into memory
+      const rc = sqlite3.capi.sqlite3_deserialize(
+        tempDb.pointer,
+        'main',
+        fileBytes,
+        fileBytes.byteLength,
+        fileBytes.byteLength,
+        sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+        sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+      );
+
+      if (rc !== 0) {
+        return false;
+      }
+
+      // Check for envelope metadata table
+      const stmt = tempDb.prepare(`
+        SELECT COUNT(*) FROM sqlite_master
+        WHERE type='table' AND name='_envelope_meta'
+      `);
+
+      try {
+        if (stmt.step()) {
+          const count = stmt.get([])[0];
+          return count > 0;
+        }
+      } finally {
+        stmt.finalize();
+      }
+
+      return false;
+    } catch (err) {
+      console.warn('[Envelope] Error checking for envelope tables:', err);
+      return false;
+    } finally {
+      tempDb.close();
+    }
+  }
+
+  /**
+   * Extract envelope tables from a canonical .gcase+ file and create sidecar
+   *
+   * Used when opening a canonical .gcase+ file that already has env_* tables.
+   * Copies the envelope tables from the file to a new OPFS sidecar.
+   *
+   * @param capsuleFile - The .gcase+ file to extract from
+   * @param sqlite3 - SQLite3 instance
+   * @param fileBytes - Raw bytes of the .gcase+ file
+   */
+  async extractFromCanonical(capsuleFile: File, sqlite3: any, fileBytes: Uint8Array): Promise<void> {
+    this.sqlite3 = sqlite3;
+    this.gcaseId = await computeCapsuleHash(capsuleFile);
+    this.opfsPath = `/envelopes/${this.gcaseId}.db`;
+
+    console.log('[Envelope] Extracting envelope from canonical .gcase+ file...');
+
+    // Create OPFS directory for sidecar
+    const opfsRoot = await navigator.storage.getDirectory();
+    const envelopesDir = await opfsRoot.getDirectoryHandle('envelopes', { create: true });
+
+    // Create new sidecar database
+    this.db = new sqlite3.oo1.OpfsDb(this.opfsPath, 'c');
+
+    // Load source file into temp in-memory DB
+    const sourceDb = new sqlite3.oo1.DB(':memory:');
+
+    try {
+      const rc = sqlite3.capi.sqlite3_deserialize(
+        sourceDb.pointer,
+        'main',
+        fileBytes,
+        fileBytes.byteLength,
+        fileBytes.byteLength,
+        sqlite3.capi.SQLITE_DESERIALIZE_FREEONCLOSE |
+        sqlite3.capi.SQLITE_DESERIALIZE_RESIZEABLE
+      );
+
+      if (rc !== 0) {
+        throw new Error(`Failed to deserialize source database: ${rc}`);
+      }
+
+      // ATTACH the new sidecar to the source DB
+      sourceDb.exec(`ATTACH DATABASE '${this.opfsPath}' AS sidecar`);
+
+      // Copy envelope tables
+      const envelopeTables = [
+        '_envelope_meta',
+        '_env_chain',
+        'env_retrieval_log',
+        'env_embeddings',
+        'env_feedback',
+        'env_context_summaries'
+      ];
+
+      for (const table of envelopeTables) {
+        // Get CREATE statement
+        const createStmt = sourceDb.prepare(`
+          SELECT sql FROM main.sqlite_master
+          WHERE type='table' AND name=?
+        `);
+
+        try {
+          createStmt.bind([table]);
+          if (createStmt.step()) {
+            const createSql = createStmt.get([])[0];
+            if (createSql) {
+              // Create table in sidecar
+              const modifiedSql = createSql.replace(/CREATE TABLE/, 'CREATE TABLE sidecar.');
+              sourceDb.exec(modifiedSql);
+              console.log(`[Envelope] Created sidecar table: ${table}`);
+
+              // Copy data
+              sourceDb.exec(`INSERT INTO sidecar.${table} SELECT * FROM main.${table}`);
+              const countStmt = sourceDb.prepare(`SELECT COUNT(*) FROM sidecar.${table}`);
+              try {
+                countStmt.step();
+                const count = countStmt.get([])[0];
+                console.log(`[Envelope] Copied ${count} rows to ${table}`);
+              } finally {
+                countStmt.finalize();
+              }
+            }
+          }
+        } finally {
+          createStmt.finalize();
+        }
+      }
+
+      // Copy views
+      const views = ['v_recent_activity', 'v_envelope_stats', 'v_search_analytics', 'v_zero_result_queries'];
+      for (const view of views) {
+        const viewStmt = sourceDb.prepare(`
+          SELECT sql FROM main.sqlite_master
+          WHERE type='view' AND name=?
+        `);
+
+        try {
+          viewStmt.bind([view]);
+          if (viewStmt.step()) {
+            const viewSql = viewStmt.get([])[0];
+            if (viewSql) {
+              const modifiedSql = viewSql.replace(/CREATE VIEW/, 'CREATE VIEW sidecar.');
+              sourceDb.exec(modifiedSql);
+              console.log(`[Envelope] Created view: ${view}`);
+            }
+          }
+        } finally {
+          viewStmt.finalize();
+        }
+      }
+
+      // Copy indexes
+      const indexStmt = sourceDb.prepare(`
+        SELECT sql FROM main.sqlite_master
+        WHERE type='index' AND sql IS NOT NULL AND name LIKE 'idx_%'
+      `);
+
+      try {
+        while (indexStmt.step()) {
+          const indexSql = indexStmt.get([])[0];
+          if (indexSql && (indexSql.includes('env_') || indexSql.includes('_env_'))) {
+            try {
+              const modifiedSql = indexSql.replace(/ON\s+(\w+)/, 'ON sidecar.$1');
+              sourceDb.exec(modifiedSql);
+            } catch (err) {
+              console.warn(`[Envelope] Index copy failed:`, err);
+            }
+          }
+        }
+      } finally {
+        indexStmt.finalize();
+      }
+
+      // DETACH sidecar
+      sourceDb.exec('DETACH DATABASE sidecar');
+
+      console.log('[Envelope] Extraction complete');
+
+    } finally {
+      sourceDb.close();
+    }
+
+    // Get last hash from metadata
+    const stmt = this.db.prepare(`
+      SELECT value FROM _envelope_meta WHERE key = 'last_hash'
+    `);
+
+    let lastHash = '0'.repeat(64);
+    try {
+      if (stmt.step()) {
+        lastHash = stmt.get([])[0];
+      }
+    } finally {
+      stmt.finalize();
+    }
+
+    // Initialize writer
+    this.writer = new EnvelopeWriter(this.db, lastHash);
+
+    console.log(`[Envelope] Extracted envelope for ${this.gcaseId}`);
+  }
+
+  /**
    * Create a new runtime sidecar for a capsule
    *
    * NOTE: This creates a temporary OPFS write buffer, not the canonical format.
-   * Use exportGlyphCase() to get the canonical single-file .gcase+ format.
+   * Use saveGlyphCase() to get the canonical single-file .gcase+ format.
    */
   async create(capsuleFile: File, sqlite3: any): Promise<void> {
     this.sqlite3 = sqlite3; // Store for later use

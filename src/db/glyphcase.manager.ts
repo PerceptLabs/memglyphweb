@@ -229,30 +229,36 @@ export class GlyphCaseManager {
   }
 
   /**
-   * Export canonical .gcase+ file (Core + Envelope merged into one file)
+   * Save canonical .gcase+ file (Core + Envelope merged into one file)
    *
-   * This is the CANONICAL export format per the GlyphCase specification.
-   * The result is a single, self-contained SQLite file with both Core
-   * and Envelope tables merged together.
+   * This creates the CANONICAL single-file format per the GlyphCase specification.
+   * The result is a self-contained SQLite file with both Core and Envelope tables.
    *
-   * For static mode, returns the Core database only.
-   * For dynamic mode, merges Core + Envelope sidecar into one file.
+   * For static mode, returns the Core database only (.gcase).
+   * For dynamic mode, merges Core + Envelope sidecar into one file (.gcase+).
    *
    * @returns Blob containing the .gcase or .gcase+ file
    */
-  async exportGlyphCase(): Promise<Blob> {
+  async saveGlyphCase(): Promise<Blob> {
     // Get Core database bytes from worker
     const coreBytes = await this.dbClient.exportDatabase();
 
     // If static mode or no envelope, just return Core
     if (this.currentModality === 'static' || !this.envelopeManager.isOpen()) {
-      console.log('[GlyphCase] Exporting Standard GlyphCase (Core only)');
+      console.log('[GlyphCase] Saving Standard GlyphCase (Core only)');
       return new Blob([coreBytes], { type: 'application/x-sqlite3' });
     }
 
     // Dynamic mode: merge Core + Envelope
-    console.log('[GlyphCase] Exporting Dynamic GlyphCase (.gcase+)');
+    console.log('[GlyphCase] Saving Dynamic GlyphCase (.gcase+)');
     return this.envelopeManager.mergeWithCore(coreBytes);
+  }
+
+  /**
+   * @deprecated Use saveGlyphCase() instead. This alias exists for backward compatibility.
+   */
+  async exportGlyphCase(): Promise<Blob> {
+    return this.saveGlyphCase();
   }
 
   /**

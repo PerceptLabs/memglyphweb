@@ -13,7 +13,7 @@ export interface ModalityBadgeProps {
   modality: Modality;
   envelopeStats?: EnvelopeStats | null;
   onEnableDynamic?: () => Promise<void>;
-  onExportGlyphCase?: () => Promise<void>;
+  onSaveGlyphCase?: () => Promise<void>;
   onClearEnvelope?: () => Promise<void>;
   onVerifyEnvelope?: () => Promise<void>;
 }
@@ -22,7 +22,7 @@ export function ModalityBadge({
   modality,
   envelopeStats,
   onEnableDynamic,
-  onExportGlyphCase,
+  onSaveGlyphCase,
   onClearEnvelope,
   onVerifyEnvelope
 }: ModalityBadgeProps) {
@@ -42,15 +42,15 @@ export function ModalityBadge({
     }
   };
 
-  const handleExport = async () => {
-    if (!onExportGlyphCase) return;
+  const handleSave = async () => {
+    if (!onSaveGlyphCase) return;
     setLoading(true);
     try {
-      await onExportGlyphCase();
+      await onSaveGlyphCase();
       setShowMenu(false);
     } catch (err) {
-      console.error('Failed to export GlyphCase:', err);
-      alert(`Failed to export GlyphCase: ${err}`);
+      console.error('Failed to save GlyphCase:', err);
+      alert(`Failed to save GlyphCase: ${err}`);
     } finally {
       setLoading(false);
     }
@@ -193,7 +193,7 @@ export function ModalityBadge({
 
                 <button
                   className="btn-secondary btn-sm"
-                  onClick={handleExport}
+                  onClick={handleSave}
                   disabled={loading}
                 >
                   {loading ? 'Saving...' : '💾 Save GlyphCase'}

@@ -158,8 +158,8 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
                 modality={glyphCase.modality}
                 envelopeStats={glyphCase.envelopeStats}
                 onEnableDynamic={glyphCase.enableDynamicMode}
-                onExportGlyphCase={async () => {
-                  const blob = await glyphCase.exportGlyphCase();
+                onSaveGlyphCase={async () => {
+                  const blob = await glyphCase.saveGlyphCase();
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
