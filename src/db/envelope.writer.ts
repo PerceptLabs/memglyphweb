@@ -6,9 +6,27 @@
  * - Links to parent hash (Merkle chain)
  * - Updates _env_chain table
  * - Provides verification methods
+ *
+ * Size Limits (generous but bounded):
+ * - Query text: 10KB
+ * - Top docs JSON: 100KB
+ * - Feedback notes: 50KB
+ * - Summary text: 100KB
+ * - Embedding vector: 10K dimensions
+ * - Metadata JSON: 50KB
  */
 
 export type EnvelopeTable = 'retrieval_log' | 'embeddings' | 'feedback' | 'summaries';
+
+// Size limits (in bytes or elements)
+const SIZE_LIMITS = {
+  QUERY_TEXT: 10 * 1024,        // 10KB
+  TOP_DOCS_JSON: 100 * 1024,    // 100KB
+  FEEDBACK_NOTES: 50 * 1024,    // 50KB
+  SUMMARY_TEXT: 100 * 1024,     // 100KB
+  EMBEDDING_DIMS: 10000,        // 10K dimensions
+  METADATA_JSON: 50 * 1024      // 50KB
+} as const;
 
 export interface EnvelopeAppend {
   table: EnvelopeTable;
@@ -51,6 +69,35 @@ export interface ChainBlock {
   block_type: string;
   row_count: number;
   created_at: string;
+}
+
+/**
+ * Validate size limits for envelope data
+ */
+function validateSize(value: string | undefined | null, limit: number, fieldName: string): void {
+  if (!value) return;
+  const size = new TextEncoder().encode(value).length;
+  if (size > limit) {
+    throw new Error(
+      `Envelope size limit exceeded: ${fieldName} is ${size} bytes ` +
+      `(limit: ${limit} bytes). Data will be truncated.`
+    );
+  }
+}
+
+/**
+ * Truncate string to size limit (respects UTF-8 boundaries)
+ */
+function truncateToSize(value: string, limit: number): string {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let encoded = encoder.encode(value);
+
+  if (encoded.length <= limit) return value;
+
+  // Truncate and add ellipsis
+  const truncated = encoded.slice(0, limit - 3);
+  return decoder.decode(truncated) + '...';
 }
 
 /**
@@ -126,11 +173,18 @@ export class EnvelopeWriter {
    * Append a retrieval log entry
    */
   async appendRetrieval(data: RetrievalLogData): Promise<string> {
+    // Apply size limits with truncation
+    const safeQueryText = truncateToSize(data.query_text, SIZE_LIMITS.QUERY_TEXT);
+    const topDocsJson = data.top_docs ? JSON.stringify(data.top_docs) : null;
+    const safeTopDocsJson = topDocsJson
+      ? truncateToSize(topDocsJson, SIZE_LIMITS.TOP_DOCS_JSON)
+      : null;
+
     const timestamp = new Date().toISOString();
     const hash = await computeHash({
       table: 'retrieval_log',
       rowId: data.id,
-      data,
+      data: { ...data, query_text: safeQueryText },
       parentHash: this.lastHash,
       timestamp
     });
@@ -145,9 +199,9 @@ export class EnvelopeWriter {
     try {
       stmt.bind([
         data.id,
-        data.query_text,
+        safeQueryText,
         data.query_type,
-        data.top_docs ? JSON.stringify(data.top_docs) : null,
+        safeTopDocsJson,
         data.hit_count,
         this.lastHash,
         timestamp
@@ -168,6 +222,20 @@ export class EnvelopeWriter {
    * Append an embedding entry
    */
   async appendEmbedding(data: EmbeddingData): Promise<string> {
+    // Validate vector dimensions
+    if (data.vector.length > SIZE_LIMITS.EMBEDDING_DIMS) {
+      throw new Error(
+        `Embedding vector too large: ${data.vector.length} dimensions ` +
+        `(limit: ${SIZE_LIMITS.EMBEDDING_DIMS})`
+      );
+    }
+
+    // Apply size limit to metadata
+    const metadataJson = data.metadata ? JSON.stringify(data.metadata) : null;
+    const safeMetadataJson = metadataJson
+      ? truncateToSize(metadataJson, SIZE_LIMITS.METADATA_JSON)
+      : null;
+
     const timestamp = new Date().toISOString();
     const hash = await computeHash({
       table: 'embeddings',
@@ -192,7 +260,7 @@ export class EnvelopeWriter {
         data.id,
         data.source,
         vectorBlob,
-        data.metadata ? JSON.stringify(data.metadata) : null,
+        safeMetadataJson,
         this.lastHash,
         timestamp
       ]);
@@ -212,11 +280,16 @@ export class EnvelopeWriter {
    * Append a feedback entry
    */
   async appendFeedback(data: FeedbackData): Promise<string> {
+    // Apply size limit to notes
+    const safeNotes = data.notes
+      ? truncateToSize(data.notes, SIZE_LIMITS.FEEDBACK_NOTES)
+      : null;
+
     const timestamp = new Date().toISOString();
     const hash = await computeHash({
       table: 'feedback',
       rowId: data.id,
-      data,
+      data: { ...data, notes: safeNotes || undefined },
       parentHash: this.lastHash,
       timestamp
     });
@@ -233,7 +306,7 @@ export class EnvelopeWriter {
         data.id,
         data.retrieval_id || null,
         data.rating,
-        data.notes || null,
+        safeNotes,
         this.lastHash,
         timestamp
       ]);
@@ -253,11 +326,14 @@ export class EnvelopeWriter {
    * Append a context summary entry
    */
   async appendSummary(data: SummaryData): Promise<string> {
+    // Apply size limit to summary text
+    const safeSummary = truncateToSize(data.summary, SIZE_LIMITS.SUMMARY_TEXT);
+
     const timestamp = new Date().toISOString();
     const hash = await computeHash({
       table: 'summaries',
       rowId: data.id,
-      data,
+      data: { ...data, summary: safeSummary },
       parentHash: this.lastHash,
       timestamp
     });
@@ -272,7 +348,7 @@ export class EnvelopeWriter {
     try {
       stmt.bind([
         data.id,
-        data.summary,
+        safeSummary,
         data.relevance,
         data.source_retrievals ? JSON.stringify(data.source_retrievals) : null,
         this.lastHash,

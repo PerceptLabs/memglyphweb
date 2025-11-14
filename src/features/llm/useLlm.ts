@@ -10,6 +10,8 @@ import { getLlmClient, QWEN_MODELS } from '../../db/llm-client';
 import type { LlmModelInfo, ReasoningResponse, LlmProgress } from '../../db/llm-types';
 import type { HybridResult } from '../../db/types';
 import { publishLlmPrompt, publishLlmOutput, publishLlmCitation } from '../../core/stream';
+import { glyphCaseManager } from '../../db/glyphcase.manager';
+import { generateEnvelopeId } from '../../db/envelope.writer';
 
 export interface UseLlmOptions {
   autoReason?: boolean;  // Auto-trigger reasoning after search
@@ -122,9 +124,20 @@ export function useLlm(options: UseLlmOptions = {}) {
       }
       setEnabled(true);
     } else {
-      // Disabling
+      // Disabling - unload model to free memory
       setEnabled(false);
       setReasoning(null);
+
+      if (modelInfo?.loaded) {
+        try {
+          const llmClient = getLlmClient();
+          await llmClient.unloadModel();
+          setModelInfo({ ...modelInfo, loaded: false });
+          console.log('[LLM] Model unloaded successfully');
+        } catch (err) {
+          console.error('[LLM] Failed to unload model:', err);
+        }
+      }
     }
   };
 
@@ -181,15 +194,20 @@ export function useLlm(options: UseLlmOptions = {}) {
         temperature,
       });
 
+      // Map used GIDs back to full snippet objects
+      const usedSnippetObjects = response.usedSnippets
+        .map(gid => snippets.find(s => s.gid === gid))
+        .filter(s => s !== undefined);
+
       // Publish output event to stream
       publishLlmOutput({
         response: response.answer,
-        citations: response.usedSnippets.map(s => ({ gid: s.gid, pageNo: s.pageNo })),
+        citations: usedSnippetObjects.map(s => ({ gid: s.gid, pageNo: s.pageNo })),
         model: modelInfo.modelId
       });
 
       // Publish citation events for each used snippet
-      response.usedSnippets.forEach(snippet => {
+      usedSnippetObjects.forEach(snippet => {
         publishLlmCitation({
           gid: snippet.gid,
           pageNo: snippet.pageNo,
@@ -197,6 +215,27 @@ export function useLlm(options: UseLlmOptions = {}) {
           snippet: snippet.text
         });
       });
+
+      // Persist LLM output to envelope (if in dynamic mode)
+      if (glyphCaseManager.isDynamic()) {
+        const envelope = glyphCaseManager.getEnvelope();
+        if (envelope.isOpen()) {
+          const writer = envelope.getWriter();
+          if (writer) {
+            // Calculate relevance from average of used snippet scores
+            const avgScore = usedSnippetObjects.length > 0
+              ? usedSnippetObjects.reduce((sum, s) => sum + s.score, 0) / usedSnippetObjects.length
+              : 1.0;
+
+            await writer.appendSummary({
+              id: generateEnvelopeId('llm'),
+              summary: response.answer,
+              relevance: avgScore,
+              source_retrievals: response.usedSnippets // Array of GID strings
+            });
+          }
+        }
+      }
 
       setReasoning(response);
       setIsStreaming(false);
