@@ -30,6 +30,8 @@ export interface GlyphCaseInfo extends CapsuleInfo {
   modality: Modality;
   envelopeStats?: EnvelopeStats;
   envelopeExtracted?: boolean; // True if envelope was extracted from canonical .gcase+ file
+  hasScripts?: boolean; // True if TCMR scripts detected (via metadata or /scripts/ directory)
+  hasPandaCss?: boolean; // True if Panda CSS detected (via metadata or /gc/ui/ directory)
 }
 
 /**
@@ -114,6 +116,122 @@ export class GlyphCaseManager {
     // Open Core database
     const coreInfo = await this.dbClient.openFromFile(file);
 
+    // Detect TCMR scripts
+    let hasScripts = false;
+    try {
+      // Method 1: Check metadata for mgqd_extensions
+      const metadataRows = await this.dbClient.query(
+        'SELECT value FROM _metadata WHERE key = ?',
+        ['mgqd_extensions']
+      );
+
+      if (metadataRows.length > 0) {
+        try {
+          const extensions = JSON.parse(metadataRows[0].value);
+          if (Array.isArray(extensions) && extensions.includes('tcmr')) {
+            hasScripts = true;
+            logger.info('TCMR scripts detected via metadata', {
+              filename: file.name,
+              extensions
+            });
+          }
+        } catch (parseErr) {
+          logger.warn('Failed to parse mgqd_extensions metadata', {
+            filename: file.name,
+            error: parseErr
+          });
+        }
+      }
+
+      // Method 2: Fallback - scan for /scripts/ directory in sqlar
+      if (!hasScripts) {
+        const scriptRows = await this.dbClient.query(
+          "SELECT COUNT(*) as count FROM sqlar WHERE name LIKE 'scripts/%'",
+          []
+        );
+
+        if (scriptRows.length > 0 && scriptRows[0].count > 0) {
+          hasScripts = true;
+          logger.warn('TCMR scripts detected via directory scan', {
+            filename: file.name,
+            scriptCount: scriptRows[0].count,
+            recommendation: 'Add "tcmr" to mgqd_extensions in _metadata'
+          });
+        }
+      }
+
+      if (hasScripts) {
+        logger.info('TCMR support detected', {
+          filename: file.name,
+          note: 'Scripts are not executable in PWA (display only)'
+        });
+      }
+    } catch (err) {
+      // Don't fail if TCMR detection fails - just log and continue
+      logger.debug('TCMR detection skipped', {
+        filename: file.name,
+        reason: 'No _metadata or sqlar tables (expected for some formats)'
+      });
+    }
+
+    // Detect Panda CSS
+    let hasPandaCss = false;
+    try {
+      // Method 1: Check metadata for mgqd_extensions
+      const metadataRows = await this.dbClient.query(
+        'SELECT value FROM _metadata WHERE key = ?',
+        ['mgqd_extensions']
+      );
+
+      if (metadataRows.length > 0) {
+        try {
+          const extensions = JSON.parse(metadataRows[0].value);
+          if (Array.isArray(extensions) && extensions.includes('panda-css')) {
+            hasPandaCss = true;
+            logger.info('Panda CSS detected via metadata', {
+              filename: file.name,
+              extensions
+            });
+          }
+        } catch (parseErr) {
+          logger.warn('Failed to parse mgqd_extensions metadata', {
+            filename: file.name,
+            error: parseErr
+          });
+        }
+      }
+
+      // Method 2: Fallback - scan for /gc/ui/ directory in sqlar
+      if (!hasPandaCss) {
+        const pandaRows = await this.dbClient.query(
+          "SELECT COUNT(*) as count FROM sqlar WHERE name LIKE 'gc/ui/%'",
+          []
+        );
+
+        if (pandaRows.length > 0 && pandaRows[0].count > 0) {
+          hasPandaCss = true;
+          logger.warn('Panda CSS detected via directory scan', {
+            filename: file.name,
+            fileCount: pandaRows[0].count,
+            recommendation: 'Add "panda-css" to mgqd_extensions in _metadata'
+          });
+        }
+      }
+
+      if (hasPandaCss) {
+        logger.info('Panda CSS support detected', {
+          filename: file.name,
+          note: 'Design tokens and styles available for UI enhancement'
+        });
+      }
+    } catch (err) {
+      // Don't fail if Panda CSS detection fails - just log and continue
+      logger.debug('Panda CSS detection skipped', {
+        filename: file.name,
+        reason: 'No _metadata or sqlar tables (expected for some formats)'
+      });
+    }
+
     // Determine modality
     let modality: Modality;
     if (requestDynamic !== undefined) {
@@ -142,7 +260,9 @@ export class GlyphCaseManager {
       ...coreInfo,
       modality,
       envelopeStats,
-      envelopeExtracted: hasEnvelope
+      envelopeExtracted: hasEnvelope,
+      hasScripts,
+      hasPandaCss
     };
 
     // Publish to stream

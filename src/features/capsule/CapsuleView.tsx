@@ -156,6 +156,7 @@ export function CapsuleView({ capsuleInfo, onClose }: CapsuleViewProps) {
               </div>
               <ModalityBadge
                 modality={glyphCase.modality}
+                hasScripts={glyphCase.info?.hasScripts}
                 envelopeStats={glyphCase.envelopeStats}
                 envelopeExtracted={glyphCase.info?.envelopeExtracted}
                 onEnableDynamic={glyphCase.enableDynamicMode}

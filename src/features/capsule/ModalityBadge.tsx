@@ -11,6 +11,7 @@ import './ModalityBadge.css';
 
 export interface ModalityBadgeProps {
   modality: Modality;
+  hasScripts?: boolean;
   envelopeStats?: EnvelopeStats | null;
   envelopeExtracted?: boolean;
   onEnableDynamic?: () => Promise<void>;
@@ -21,6 +22,7 @@ export interface ModalityBadgeProps {
 
 export function ModalityBadge({
   modality,
+  hasScripts,
   envelopeStats,
   envelopeExtracted,
   onEnableDynamic,
@@ -101,14 +103,31 @@ export function ModalityBadge({
 
   const isDynamic = modality === 'dynamic';
 
+  // Build tooltip text
+  const tooltipParts = [
+    isDynamic ? 'Dynamic GlyphCase' : 'Static GlyphCase'
+  ];
+  if (hasScripts) {
+    tooltipParts.push('Contains automation scripts (not executable in PWA)');
+  }
+  tooltipParts.push('Click for options');
+  const tooltip = tooltipParts.join(' • ');
+
   return (
     <div className="modality-badge">
       <button
-        className={`modality-badge-button ${modality}`}
+        className={`modality-badge-button ${modality} ${hasScripts ? 'has-scripts' : ''}`}
         onClick={() => setShowMenu(!showMenu)}
-        title={isDynamic ? 'Dynamic GlyphCase - Click for options' : 'Static GlyphCase - Click for options'}
+        title={tooltip}
       >
-        {isDynamic ? '🧠 Dynamic' : '📦 Static'}
+        <span className="modality-badge-text">
+          {isDynamic ? '🧠 Dynamic' : '📦 Static'}
+        </span>
+        {hasScripts && (
+          <span className="scripts-badge" title="TCMR automation scripts detected">
+            ⚡ Scripts
+          </span>
+        )}
       </button>
 
       {showMenu && (
